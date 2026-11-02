@@ -1,6 +1,6 @@
 # Diseño base: Sistema DSM con paginación bajo demanda y coherencia MSI
  
-> Documento de trabajo para IC-6600 (Principios de Sistemas Operativos, II-2026). Reúne las decisiones de diseño discutidas, el razonamiento detrás de cada una y las preguntas que siguen abiertas. Sirve de base para el **Entregable 1 (6 nov)**; no es el entregable final.
+> Documento de trabajo para IC-6600 (Principios de Sistemas Operativos, II-2026). Reúne las decisiones de diseño discutidas, el razonamiento detrás de cada una y las preguntas que siguen abiertas. Sirve de base para el **Entregable 1 (6 nov)**; no es el entregable final. Incluye también la división del trabajo (§18 a §21) y el contrato entre módulos (§19 y Apéndice A).
  
 ---
  
@@ -19,6 +19,8 @@
 | D9 | Ruta de `PAGE_DATA` | **Decidida** | Pasa por el home (ver §6.3) |
 | D10 | Detección de lectura vs. escritura en el handler | **Decidida** | Código de error en `ucontext` (x86-64), con respaldo por estado de página (ver §3.3) |
 | D11 | Semántica de `dsm_barrier` | **Decidida** | Solo sincronización, sin write-back (ver §9) |
+| D12 | Respuesta del owner al home | **Propuesta** | Mensaje separado `FETCH_REPLY` (ver §6.3) |
+| D13 | División del trabajo | **Propuesta** | Por capas: A = memoria/coherencia, B = red/administración (ver §18) |
  
 ---
  
@@ -269,8 +271,9 @@ Cuidados:
 | Mensaje | Dirección | `payload_len` | Descripción |
 |---|---|---|---|
 | `PAGE_REQUEST` | solicitante → home | 0 | Pide página con acceso READ o WRITE |
-| `PAGE_DATA` | owner/home → solicitante | `page_size` | Contenido + permiso concedido |
+| `PAGE_DATA` | home → solicitante | `page_size` | Contenido + permiso concedido |
 | `FETCH` | home → owner | 0 | El home pide los datos frescos al owner |
+| `FETCH_REPLY` | owner → home | `page_size` | Datos pedidos por `FETCH`. Se separa de `PAGE_DATA` para que el listener sepa, solo por el tipo, si los bytes van al directorio o al pager |
 | `INVALIDATE` | home → nodos del copyset | 0 | Invalidar la copia local |
 | `INVALIDATE_ACK` | nodo → home | 0 | Confirma la invalidación |
 | `PAGE_WRITEBACK` | owner → contribuyente/home | `page_size` | Actualiza la copia de referencia |
@@ -294,9 +297,9 @@ Para cada mensaje, el informe debe documentar: quién lo envía, parámetros, re
  
 1. Fallo → handler → `PAGE_REQUEST(READ)` al home.
 2. El home consulta su directorio:
-   - Si `owner_node` está en M: `FETCH` al owner → el owner baja a S, envía datos (y write-back).
+   - Si `owner_node` está en M: `FETCH` al owner → el owner baja a S y responde con `FETCH_REPLY` al home (que guarda la copia de referencia).
    - Si no, los datos ya están disponibles en algún nodo del copyset o en el contribuyente.
-3. `PAGE_DATA` al solicitante. Se copia por la vista del sistema, `mprotect(PROT_READ)`, el home añade al nodo al `copyset`.
+3. `PAGE_DATA` al solicitante, enviado por el home. Se copia por la vista del sistema, `mprotect(PROT_READ)`, el home añade al nodo al `copyset`.
 ### 7.2 Escritura de una página en I o S
  
 1. `PAGE_REQUEST(WRITE)` al home.
@@ -473,7 +476,7 @@ Usar el **rango de puertos asignado a la pareja**. Documentar todo parámetro nu
  
 ## 13. Módulos de código
  
-`config.c`, `dsm.c` (API y alloc), `pager.c` (handler y MSI local), `directory.c` (directorio en el home), `network.c` (listener, pool, mensajes), `heartbeat.c`, `stats.c`, `main.c`, más `Makefile`. Repositorio Git con commits de **ambas personas** durante las semanas del proyecto.
+`config.c`, `cluster.c` (tabla de nodos, heartbeat, hash de home), `network.c` (listener, pool, mensajes), `pager.c` (handler y MSI local), `directory.c` (directorio en el home), `dsm.c` (API y alloc), `stats.c`, `main.c`, más `Makefile`. Responsables de cada módulo en §18.2. Repositorio Git con commits de **ambas personas** durante las semanas del proyecto.
  
 ---
  
@@ -503,6 +506,8 @@ Cuidados específicos de DSM:
  
 ## 16. Plan por entregas
  
+> El detalle por persona está en §20.
+ 
 | Fecha | Entregable | Meta |
 |---|---|---|
 | **6 nov** | Entregable 1 | Este documento convertido a diseño formal: arquitectura, API borrador, protocolo, configuración, estructuras y tamaños, diagramas |
@@ -513,3 +518,443 @@ Cuidados específicos de DSM:
 **Experimento de una tarde (antes de todo):** en un solo proceso, `mmap` un bloque, ponerlo `PROT_NONE`, registrar `sigaction`, y en el handler hacer `mprotect` a RW. Si el programa continúa, la parte más rara del proyecto queda desmitificada.
  
 ---
+ 
+## 17. Preguntas abiertas
+ 
+- ~~Q-A~~ **Resuelta:** `max_nodes = 16`.
+- ~~Q-B~~ **Resuelta:** pasa por el home.
+- ~~Q-C~~ **Resuelta:** C.
+- **Q-D:** ¿Vista del sistema con `memfd_create` o `shm_open`? (ambas sirven; `memfd_create` es más simple en un solo proceso)
+- ~~Q-E~~ **Resuelta:** código de error en `ucontext` (x86-64), con respaldo por estado de página.
+- ~~Q-F~~ **Resuelta:** el barrier es solo sincronización, sin write-back.
+- **Q-G:** ¿Qué pasa con el directorio de un home que cae? (dejarlo documentado como limitación o replicarlo)
+- **Q-H:** ¿Extra 1 sí o no? Decidirlo después del Prototipo 2.
+---
+ 
+## 18. División del trabajo
+ 
+### 18.1 Principio: dividir por capas
+ 
+- **Persona A: memoria y coherencia.** Todo lo que ocurre *dentro* de un nodo: memoria virtual, handler de `SIGSEGV`, `mprotect`, estados MSI locales.
+- **Persona B: red y administración.** Todo lo que ocurre *entre* nodos: sockets, mensajes, pool de hilos, unión de nodos, heartbeat, configuración, estadísticas.
+- **Ambas:** directorio, API, integración, Makefile, repositorio y pruebas en el laboratorio.
+Asignación: Persona A = ____________ · Persona B = ____________
+ 
+### 18.2 Módulos y responsables
+ 
+| Módulo | Contenido | Responsable |
+|---|---|---|
+| `pager.c` | `mmap`, doble mapeo, `sigaction`/handler, `mprotect`, estados MSI locales, `fault_ctx_t`, coordinación handler ↔ hilo de red | **A** |
+| `network.c` | Sockets, listener, pool de hilos, framing (`read_exact`), `net_send`, timeouts, `net_register` | **B** |
+| `cluster.c` | Tabla de nodos, `JOIN`/`NODE_LIST`, heartbeat, hash de home, `cluster_initial_owner` | **B** |
+| `config.c` | Parser de `dsm.conf` | **B** |
+| `stats.c` | Estadísticas y consultas en texto/HTML | **B** (A provee accesores como `pager_get_state`) |
+| `directory.c` | Directorio por página, cola de pendientes, invalidaciones, `FETCH` | **Ambas, en pareja** |
+| `dsm.c` (API) | `dsm_init`, `dsm_shutdown`, `dsm_free`, `dsm_alloc`, `dsm_barrier` | **Ambas**: A = init/shutdown/free y alloc local; B = barrier y alloc remoto (`ALLOC_*`) |
+| `main.c`, `Makefile`, `dsm.conf` | Arranque, compilación, configuración de ejemplo | **Ambas** |
+| App de prueba 1 y 2 | Dos aplicaciones reales adaptadas al API | Una cada persona; ambas deben poder explicar las dos |
+ 
+### 18.3 Qué se hace en pareja y por qué
+ 
+| Tarea | Por qué en pareja |
+|---|---|
+| `directory.c` | Toca estado MSI (lado A) y mensajes (lado B); es donde se concentran las carreras |
+| Diagrama de escritura con invalidaciones | Es el flujo más complejo y el que más se pregunta en la defensa |
+| Reglas de deadlocks (§8) | Ambos deben poder explicarlas |
+| Integración del Prototipo 1 y 2 | Los errores aparecen en la frontera entre capas |
+| Pruebas en el laboratorio | Hay que estar presentes los dos |
+ 
+### 18.4 Entregable 1: quién redacta y quién revisa
+ 
+| Sección del documento | Redacta | Revisa |
+|---|---|---|
+| Arquitectura general (hilos, tablas) | B | A |
+| Memoria virtual, doble mapeo, handler | A | B |
+| Diagrama de estados MSI con `PENDING` | A | B |
+| Secuencia handler ↔ hilo de red | A | B |
+| Protocolo: tabla de mensajes, formatos, errores | B | A |
+| Configuración (`dsm.conf`) | B | A |
+| `JOIN`, heartbeat (diagramas) | B | A |
+| Estructuras, tipos y **tamaños** (`page_local_t`, `dir_entry_t`) | A | B |
+| Estructuras, tipos y **tamaños** (`msg_header_t`, `node_info_t`, `dsm_config_t`) | B | A |
+| Directorio y secuencias de lectura/escritura | Ambas | n/a |
+| Borrador de API con firmas y errores | Ambas | n/a |
+ 
+---
+ 
+## 19. Interfaces entre módulos
+ 
+El contrato completo está en el **Apéndice A (`internal.h`)**. Resumen:
+ 
+### 19.1 Reglas del contrato
+ 
+1. **Nunca llamar a `net_*` teniendo tomado un `page->lock`.**
+2. Los handlers `MSG_INLINE` corren en el listener y **no pueden bloquearse** ni esperar respuestas de red.
+3. Los handlers `MSG_POOL` corren en el pool y **sí pueden bloquearse**, porque las respuestas las procesa el listener.
+4. Orden de locks: `tabla_nodos` → `tabla_procesos` → `tabla_fallos` → `page_lock[id]` (id ascendente).
+5. El hilo de red y el pool escriben páginas **solo por la vista del sistema** (`pager_sys_addr`).
+### 19.2 Quién atiende cada mensaje
+ 
+| Mensaje | Clase | Módulo | Función |
+|---|---|---|---|
+| `PAGE_REQUEST` | POOL | directory | `dir_on_page_request` |
+| `PAGE_DATA` | INLINE | pager | `pager_on_page_data` |
+| `FETCH` | POOL | pager | `pager_on_fetch` (luego responde con `FETCH_REPLY`) |
+| `FETCH_REPLY` | INLINE | directory | `dir_on_fetch_reply` |
+| `INVALIDATE` | POOL | pager | `pager_on_invalidate` (el handler registrado en `pager.c` envía después el ACK con `net_send`) |
+| `INVALIDATE_ACK` | INLINE | directory | `dir_on_invalidate_ack` |
+| `PAGE_WRITEBACK` | POOL | directory | `dir_on_writeback` |
+| `JOIN`, `NODE_LIST`, `HEARTBEAT` | INLINE | cluster | (internas de `cluster.c`) |
+| `ALLOC_REQUEST/REPLY`, `STATS_REQUEST/REPLY` | POOL | dsm / stats | (internas) |
+| `BARRIER_ARRIVE` | POOL | dsm | (interna) |
+| `BARRIER_RELEASE` | INLINE | dsm | (interna; solo `sem_post`) |
+ 
+### 19.3 Cómo trabajar sin esperar a la otra persona (stubs)
+ 
+- **A** prueba `pager.c` con un `stub_net.c` cuyo `net_send` devuelve la respuesta de inmediato (simula un home que siempre contesta `PAGE_DATA`).
+- **B** prueba `network.c` con handlers de eco y mensajes sintéticos, sin pager.
+- Cuando se integran, los stubs se reemplazan por los módulos reales sin cambiar las firmas.
+### 19.4 Cambios al contrato
+ 
+Una firma de `internal.h` se cambia **primero en ese archivo**, con commit propio y aviso a la otra persona. Nadie modifica la interfaz de la otra capa por su cuenta.
+ 
+---
+ 
+## 20. Plan detallado por persona
+ 
+### Fase 0: Entregable 1 (1 al 6 de nov)
+ 
+| Día | Persona A | Persona B | Juntos |
+|---|---|---|---|
+| **Dom 1 / Lun 2** | Experimento: `mmap` + `PROT_NONE` + `sigaction` + `mprotect` en el handler; probar `REG_ERR`; probar doble mapeo con `memfd_create` | Experimento: eco TCP con `read_exact` y `msg_header_t` `packed` (verificar `sizeof` = 22) | Crear repo y Makefile base; `dsm.conf` de ejemplo con rango de puertos; revisar `internal.h`; correr `uname -m` en el laboratorio |
+| **Mar 3 / Mié 4** | Redactar sus secciones (§18.4): MSI, estados, estructuras, diagramas del handler | Redactar sus secciones: protocolo, configuración, join, heartbeat, hilos | Sesión de pareja (mié): diseñar `directory.c` y dibujar secuencias de lectura y escritura con invalidaciones |
+| **Jue 5** | Revisar la parte de B | Revisar la parte de A | Armar el API con firmas, tipos y errores; ensamblar el documento |
+| **Vie 6** | | | **Entregable 1** |
+ 
+**Listo cuando:** el documento cubre arquitectura, API, protocolo, configuración y estructuras con tamaños; ambos entienden cada sección aunque no la hayan redactado.
+ 
+### Fase 1: Prototipo 1 (7 al 13 de nov)
+ 
+| | Persona A | Persona B | Juntos |
+|---|---|---|---|
+| **Construir** | `pager_init`, handler de `SIGSEGV`, vista dual, estados I/S/M locales, `fault_ctx_t` y `sem_timedwait` | `config_load`, `net_init/net_start`, listener, framing, `net_send`, pool básico | Directorio mínimo (lectura y escritura simples, sin cola); integración |
+| **Probar** | Un nodo contra un home simulado | Dos procesos intercambiando mensajes | 2 nodos: uno escribe un valor, el otro lo lee |
+ 
+**Listo cuando:** dos nodos comparten un entero a través de `PAGE_REQUEST`/`PAGE_DATA`, sin deadlocks en 100 repeticiones. Documentar cambios a la arquitectura para el Entregable 2 (vie 13).
+ 
+### Fase 2: Prototipo 2 (14 al 20 de nov)
+ 
+| | Persona A | Persona B | Juntos |
+|---|---|---|---|
+| **Construir** | Transiciones MSI completas, estado `PENDING`, varios hilos fallando en la misma página, `MADV_DONTNEED`/`PUNCH_HOLE` | `cluster.c` completo (`JOIN`, `NODE_LIST`, heartbeat), pool configurable, `dsm_barrier`, `stats.c`, `max_nodes = 16` | Directorio con home por hash, cola por página, `FETCH`, invalidaciones y ACKs; `dsm_alloc` |
+| **Probar** | Carreras en una sola máquina con 3 o 4 nodos | Caída de un nodo y detección por heartbeat | Primera app de prueba corriendo en N nodos |
+ 
+**Listo cuando:** MSI completo con N nodos, el caso `INVALIDATE` en `PENDING` resuelto, estadísticas consultables y la primera app produciendo salidas correctas. Documentar para el Entregable 3 (vie 20).
+ 
+### Fase 3: Demo (21 al 27 de nov)
+ 
+| | Persona A | Persona B | Juntos |
+|---|---|---|---|
+| **Construir** | App de prueba 1 | App de prueba 2 | Pruebas en el laboratorio con varias computadoras físicas (no personales) |
+| **Documentar** | Informe: MSI, memoria, handler, concurrencia | Informe: protocolo, red, administración, manual de usuario | Estadísticas, rendimiento (pool de 1, 4, 8, 16), problemas encontrados, ensayo de la demo |
+ 
+**Listo cuando:** ambas apps funcionan en el laboratorio, el informe está completo y cada uno puede explicar todo el sistema.
+ 
+---
+ 
+## 21. Reglas de equipo y preparación de la defensa
+ 
+La nota es **individual** y depende de la defensa de todo el sistema, no solo de la parte propia.
+ 
+### 21.1 Reglas
+ 
+- **Revisión cruzada:** quien no escribió un módulo lo lee antes de integrarlo y hace preguntas.
+- **Rotación de lo difícil:** el directorio, los deadlocks y el flujo del handler los dominan ambos. Cada uno le explica al otro el módulo ajeno, como ensayo de la defensa.
+- **Commits de ambos cada semana:** el profesor valida el historial en Git. Evitar que uno solo concentre los commits.
+- **Ramas cortas y revisión:** integrar a `main` solo código que compile y pase una prueba básica.
+- **Cambios de interfaz:** solo vía `internal.h` (ver §19.4).
+### 21.2 Preguntas que ambos deben saber responder
+ 
+1. ¿Por qué se necesita el doble mapeo? ¿Qué pasa si el hilo de red escribe en una página `PROT_NONE`?
+2. ¿Cómo se detecta lectura vs. escritura en el handler? ¿Qué pasa si no es x86-64?
+3. ¿Qué lock protege qué, y por qué nunca se retiene mientras se espera la red?
+4. ¿Cómo se evita que el listener se espere a sí mismo? ¿Por qué hay listener y pool?
+5. ¿Qué es `PENDING` y qué pasa si llega un `INVALIDATE` en ese estado?
+6. ¿Por qué `PAGE_DATA` y `FETCH_REPLY` son mensajes distintos?
+7. ¿Cómo se calcula el home? ¿Qué pasa cuando un nodo se une? ¿Por qué `max_nodes` es fijo?
+8. ¿Cuándo se actualiza la copia de referencia y qué se pierde si un nodo en M se cae?
+9. ¿Qué garantiza `dsm_barrier` y qué no?
+10. ¿Por qué hay *false sharing* en las apps de prueba y cómo se mitigó?
+### 21.3 Riesgos y mitigaciones
+ 
+| Riesgo | Mitigación |
+|---|---|
+| Una capa bloquea a la otra hasta el Prototipo 1 | Stubs (§19.3) e `internal.h` acordado desde el inicio |
+| Integración dejada para último momento | Fecha fija de integración el 12 de nov, antes del Entregable 2 |
+| Una persona domina una capa y la otra no entiende | Revisión cruzada y rotación (§21.1) |
+| Los equipos del laboratorio no son x86-64 | Verificar `uname -m` ya; usar el respaldo por estado de página |
+| Deadlocks difíciles de reproducir | Pruebas de estrés con 3 o 4 nodos en una sola máquina y timeouts siempre activos |
+| Extra 1 consume tiempo del núcleo | Decidirlo solo tras un Prototipo 2 estable (Q-H) |
+ 
+---
+ 
+## Apéndice A: `internal.h` (contrato entre módulos, borrador)
+ 
+```c
+/*
+ * internal.h : contrato entre los modulos del DSM (BORRADOR)
+ *
+ * Duenos:
+ *   pager.c      -> Persona A  (memoria local, handler SIGSEGV, MSI local)
+ *   network.c    -> Persona B  (listener, pool, envio, framing)
+ *   cluster.c    -> Persona B  (tabla de nodos, heartbeat, hash de home)
+ *   directory.c  -> AMBAS      (directorio en el nodo home)
+ *
+ * Regla: un modulo solo llama a otro por las funciones declaradas aqui.
+ * Si necesitan cambiar una firma, se cambia aqui primero y se avisa.
+ *
+ * Contratos de hilos y locks (importantes para evitar deadlocks):
+ *  1. NUNCA llamar a net_* teniendo tomado un page->lock.
+ *  2. Handlers MSG_INLINE corren en el hilo listener: no pueden bloquearse
+ *     ni esperar respuestas de red (solo copiar, actualizar, sem_post).
+ *  3. Handlers MSG_POOL corren en el pool: SI pueden bloquearse (por
+ *     ejemplo esperando ACKs), porque las respuestas las procesa el listener.
+ *  4. Orden de locks: tabla_nodos -> tabla_procesos -> tabla_fallos
+ *     -> page_lock[id] (id ascendente).
+ *  5. El hilo de red y el pool escriben paginas SOLO por la vista del
+ *     sistema (pager_sys_addr), nunca por la de la aplicacion.
+ */
+ 
+#ifndef DSM_INTERNAL_H
+#define DSM_INTERNAL_H
+ 
+#include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
+#include <time.h>
+ 
+/* ------------------------------------------------------------------ */
+/* Constantes                                                          */
+/* ------------------------------------------------------------------ */
+ 
+#define DSM_MAX_NODES        16      /* max_nodes (decidido); el copyset admite hasta 64 */
+#define DSM_IP_LEN           46
+#define DSM_DEFAULT_PAGESZ   4096
+ 
+/* ------------------------------------------------------------------ */
+/* Codigos de error (tambien los usa el API publico)                   */
+/* ------------------------------------------------------------------ */
+ 
+typedef enum {
+    DSM_OK = 0,
+    DSM_ERR_NOMEM,
+    DSM_ERR_TIMEOUT,
+    DSM_ERR_NODE_DOWN,
+    DSM_ERR_BAD_ARG,
+    DSM_ERR_PROTO,       /* mensaje mal formado o payload_len invalido */
+    DSM_ERR_IO           /* error de socket */
+} dsm_err_t;
+ 
+/* ------------------------------------------------------------------ */
+/* Tipos compartidos                                                   */
+/* ------------------------------------------------------------------ */
+ 
+typedef uint64_t page_id_t;
+typedef uint32_t node_id_t;
+ 
+typedef enum { ACC_READ = 0, ACC_WRITE = 1 } access_t;
+ 
+typedef enum {
+    PAGE_INVALID = 0,
+    PAGE_SHARED,
+    PAGE_MODIFIED,
+    PAGE_PENDING_R,
+    PAGE_PENDING_W
+} page_state_t;
+ 
+typedef enum {
+    MSG_PAGE_REQUEST = 1,   /* solicitante -> home                         */
+    MSG_PAGE_DATA,          /* home -> solicitante (+ permiso concedido)   */
+    MSG_FETCH,              /* home -> owner: dame los datos frescos       */
+    MSG_FETCH_REPLY,        /* owner -> home: datos pedidos por MSG_FETCH  */
+    MSG_INVALIDATE,         /* home -> nodos del copyset                   */
+    MSG_INVALIDATE_ACK,     /* nodo -> home                                */
+    MSG_PAGE_WRITEBACK,     /* owner -> contribuyente                      */
+    MSG_JOIN,
+    MSG_NODE_LIST,
+    MSG_HEARTBEAT,
+    MSG_ALLOC_REQUEST,
+    MSG_ALLOC_REPLY,
+    MSG_STATS_REQUEST,
+    MSG_STATS_REPLY,
+    MSG_BARRIER_ARRIVE,
+    MSG_BARRIER_RELEASE,
+    MSG_TYPE_MAX
+} msg_type_t;
+ 
+/*
+ * Encabezado (formato en memoria = host order; network.c convierte a
+ * orden de red al enviar y de vuelta al recibir).
+ * Nota: MSG_FETCH_REPLY se separa de MSG_PAGE_DATA para que el listener
+ * sepa, solo por el tipo, si la pagina va al directorio o al pager.
+ */
+typedef struct __attribute__((packed)) {
+    uint8_t  type;          /* msg_type_t */
+    uint32_t src_node;
+    uint64_t page_id;       /* tambien se usa como id de barrier */
+    uint32_t req_id;        /* empareja respuesta con peticion */
+    uint8_t  access;        /* access_t; para PAGE_DATA = permiso concedido */
+    uint32_t payload_len;
+} msg_header_t;
+ 
+_Static_assert(sizeof(msg_header_t) == 22, "msg_header_t debe medir 22 bytes");
+ 
+typedef struct {
+    node_id_t node_id;
+    char      ip[DSM_IP_LEN];
+    uint16_t  port;
+    uint64_t  mem_bytes;
+    uint64_t  base_addr;
+    uint8_t   alive;
+    time_t    last_heartbeat;
+} node_info_t;
+ 
+/* Configuracion cargada de dsm.conf (se completa con los demas parametros) */
+typedef struct {
+    size_t   page_size;
+    uint64_t mem_per_node;
+    uint32_t max_nodes;
+    uint64_t global_base_addr;
+    uint32_t worker_pool_size;
+    uint32_t request_timeout_ms;
+    uint32_t heartbeat_interval_ms;
+    uint32_t heartbeat_timeout_ms;
+    uint32_t max_payload;
+    uint64_t hash_seed;
+    uint16_t port_main, port_control, port_heartbeat;
+    node_id_t self_id;
+    node_info_t slots[DSM_MAX_NODES];
+} dsm_config_t;
+ 
+/* ------------------------------------------------------------------ */
+/* config.c  (Persona B)                                               */
+/* ------------------------------------------------------------------ */
+ 
+dsm_err_t config_load(const char *path, dsm_config_t *out);
+const dsm_config_t *config_get(void);   /* solo lectura, valido tras config_load */
+ 
+/* ------------------------------------------------------------------ */
+/* cluster.c  (Persona B): tabla de nodos, heartbeat, hash de home     */
+/* ------------------------------------------------------------------ */
+ 
+dsm_err_t   cluster_init(const dsm_config_t *cfg);
+node_id_t   cluster_self_id(void);
+bool        cluster_is_alive(node_id_t id);
+bool        cluster_get_node(node_id_t id, node_info_t *out);  /* copia */
+ 
+/* home(page_id) = slot_de( hash(page_id) mod max_nodes ) */
+node_id_t   cluster_home_of(page_id_t page);
+ 
+/* Nodo que aporta el rango donde cae la pagina (owner inicial de los datos) */
+node_id_t   cluster_initial_owner(page_id_t page);
+ 
+/* ------------------------------------------------------------------ */
+/* network.c  (Persona B)                                              */
+/* ------------------------------------------------------------------ */
+ 
+typedef enum {
+    MSG_INLINE,   /* corre en el listener: NO puede bloquearse        */
+    MSG_POOL      /* corre en el pool: puede bloquearse               */
+} msg_class_t;
+ 
+/* payload puede ser NULL si h->payload_len == 0. El header llega en host order.
+ * El payload solo es valido durante la llamada: copiarlo si se necesita despues. */
+typedef void (*msg_handler_t)(const msg_header_t *h, const void *payload);
+ 
+dsm_err_t net_init(const dsm_config_t *cfg);
+void      net_shutdown(void);
+ 
+/* Cada modulo registra sus handlers al iniciar (antes de net_start). */
+void      net_register(msg_type_t type, msg_handler_t fn, msg_class_t cls);
+dsm_err_t net_start(void);   /* arranca listener y pool */
+ 
+/* Thread-safe. Completa src_node, req_id (si es 0) y payload_len. Con timeout. */
+dsm_err_t net_send(node_id_t dst, msg_header_t *h, const void *payload);
+ 
+/* Atajo para el handler de SIGSEGV: manda PAGE_REQUEST al home de la pagina.
+ * Devuelve el req_id usado en *req_id_out. NO espera respuesta. */
+dsm_err_t net_send_page_request(page_id_t page, access_t acc, uint32_t *req_id_out);
+ 
+/* ------------------------------------------------------------------ */
+/* pager.c  (Persona A)                                                */
+/* ------------------------------------------------------------------ */
+ 
+dsm_err_t pager_init(const dsm_config_t *cfg);  /* mmap, doble mapeo, sigaction, handlers */
+void      pager_shutdown(void);
+ 
+/* Direcciones de una pagina en cada vista */
+void *pager_app_addr(page_id_t page);   /* vista de aplicacion (permisos cambian)  */
+void *pager_sys_addr(page_id_t page);   /* vista del sistema (siempre RW)          */
+ 
+page_state_t pager_get_state(page_id_t page);   /* para stats y debug */
+ 
+/*
+ * Llamadas desde los handlers de red (registrados por pager_init):
+ *
+ *  MSG_PAGE_DATA   (INLINE) -> pager_on_page_data
+ *  MSG_INVALIDATE  (POOL)   -> pager_on_invalidate
+ *  MSG_FETCH       (POOL)   -> pager_on_fetch
+ */
+ 
+/* Orden obligatorio dentro: 1) copiar por vista del sistema, 2) mprotect de la
+ * vista de aplicacion segun 'granted', 3) actualizar estado, 4) sem_post a los
+ * hilos esperando esa pagina. */
+void pager_on_page_data(const msg_header_t *h, const void *page_bytes);
+ 
+/* Pasa la pagina a I (mprotect PROT_NONE + liberar contenido). Es idempotente:
+ * si la pagina esta en PENDING, solo marca "dato obsoleto" para descartar el
+ * PAGE_DATA que llegue. El ACK lo envia el handler de red, no el pager. */
+dsm_err_t pager_on_invalidate(page_id_t page);
+ 
+/* El pager hace primero el mprotect (baja a S si 'for_access' = READ, a I si
+ * WRITE) y despues copia la pagina a 'out' (page_size bytes) por la vista del
+ * sistema. Asi nunca se envia una pagina que la aplicacion siga modificando. */
+dsm_err_t pager_on_fetch(page_id_t page, access_t for_access, void *out);
+ 
+/* ------------------------------------------------------------------ */
+/* directory.c  (AMBAS personas)                                       */
+/* Solo se usa en el nodo que es home (por hash) de la pagina.         */
+/* ------------------------------------------------------------------ */
+ 
+dsm_err_t dir_init(const dsm_config_t *cfg);
+ 
+/*
+ *  MSG_PAGE_REQUEST     (POOL)   -> dir_on_page_request
+ *  MSG_FETCH_REPLY      (INLINE) -> dir_on_fetch_reply
+ *  MSG_INVALIDATE_ACK   (INLINE) -> dir_on_invalidate_ack
+ *  MSG_PAGE_WRITEBACK   (POOL)   -> dir_on_writeback
+ */
+ 
+/* Serializa por pagina: si hay una transaccion en curso (busy), encola la
+ * peticion y regresa. Puede bloquearse esperando FETCH_REPLY o ACKs. */
+void dir_on_page_request(const msg_header_t *h, const void *unused);
+ 
+/* Completan la transaccion pendiente: copian los bytes, o descuentan un ACK,
+ * y despiertan (sem_post) al handler del pool que espera. Nunca bloquean. */
+void dir_on_fetch_reply(const msg_header_t *h, const void *page_bytes);
+void dir_on_invalidate_ack(const msg_header_t *h, const void *unused);
+ 
+void dir_on_writeback(const msg_header_t *h, const void *page_bytes);
+ 
+/* ------------------------------------------------------------------ */
+/* API publico (dsm.h incluira esto). Dueno: AMBAS.                    */
+/* ------------------------------------------------------------------ */
+ 
+dsm_err_t dsm_init(const char *config_path);
+void     *dsm_alloc(size_t size);
+dsm_err_t dsm_free(void *ptr);
+dsm_err_t dsm_barrier(uint32_t id, uint32_t n);
+dsm_err_t dsm_shutdown(void);
+ 
+#endif /* DSM_INTERNAL_H */
+```
