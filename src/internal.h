@@ -1,3 +1,4 @@
+
 /*
  * internal.h : contrato entre los modulos del DSM (Prototipo 2)
  *
@@ -17,32 +18,32 @@
  */
 #ifndef DSM_INTERNAL_H
 #define DSM_INTERNAL_H
-
+ 
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <time.h>
 #include <netinet/in.h>
-
+ 
 #define DSM_MAX_NODES        16
 #define DSM_IP_LEN           64      /* acepta IP o nombre de host */
 #define DSM_NAME_LEN         32
 #define DSM_DEFAULT_PAGESZ   4096
-
+ 
 typedef enum {
     DSM_OK = 0, DSM_ERR_NOMEM, DSM_ERR_TIMEOUT, DSM_ERR_NODE_DOWN,
     DSM_ERR_BAD_ARG, DSM_ERR_PROTO, DSM_ERR_IO
 } dsm_err_t;
-
+ 
 typedef uint64_t page_id_t;
 typedef uint32_t node_id_t;
 typedef enum { ACC_READ = 0, ACC_WRITE = 1 } access_t;
-
+ 
 typedef enum {
     PAGE_INVALID = 0, PAGE_SHARED, PAGE_MODIFIED, PAGE_PENDING_R, PAGE_PENDING_W
 } page_state_t;
-
+ 
 typedef enum {
     MSG_PAGE_REQUEST = 1, MSG_PAGE_DATA, MSG_FETCH, MSG_FETCH_REPLY,
     MSG_INVALIDATE, MSG_INVALIDATE_ACK, MSG_PAGE_WRITEBACK,
@@ -54,7 +55,7 @@ typedef enum {
     MSG_SPAWN_TASK, MSG_TASK_DONE, MSG_TASK_STATUS,       /* [Extra 1] ejecucion distribuida */
     MSG_TYPE_MAX
 } msg_type_t;
-
+ 
 /* Encabezado: 22 bytes. Host order en memoria; network.c convierte. */
 typedef struct __attribute__((packed)) {
     uint8_t  type;
@@ -65,7 +66,7 @@ typedef struct __attribute__((packed)) {
     uint32_t payload_len;
 } msg_header_t;
 _Static_assert(sizeof(msg_header_t) == 22, "msg_header_t debe medir 22 bytes");
-
+ 
 typedef struct {
     node_id_t node_id;
     char      ip[DSM_IP_LEN];
@@ -77,7 +78,7 @@ typedef struct {
     uint32_t  tasks_running;         /* [Extra 1] tareas en ejecucion + en cola (reportado por latidos) */
     uint32_t  load100;               /* [Extra 1] carga de CPU (loadavg 1 min x 100) */
 } node_info_t;
-
+ 
 typedef struct {
     size_t   page_size;
     uint64_t mem_per_node;           /* uniforme en todos los nodos (decision documentada) */
@@ -105,13 +106,13 @@ typedef struct {
     node_id_t self_id;
     node_info_t slots[DSM_MAX_NODES];
 } dsm_config_t;
-
+ 
 static inline uint64_t dsm_now_ns(void) {
     struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
 }
 static inline uint64_t dsm_now_ms(void) { return dsm_now_ns() / 1000000ULL; }
-
+ 
 /* ---- estadisticas ---- */
 enum { ST_PAGES_I, ST_PAGES_S, ST_PAGES_M, ST_PAGES_PENDING, ST_FAULT_R, ST_FAULT_W,
        ST_PAGES_RX, ST_INVALIDATIONS, ST_FETCHES, ST_FETCH_DELAYED, ST_DIR_ENTRIES,
@@ -119,24 +120,24 @@ enum { ST_PAGES_I, ST_PAGES_S, ST_PAGES_M, ST_PAGES_PENDING, ST_FAULT_R, ST_FAUL
        ST_TASKS_SPAWNED, ST_TASKS_EXECUTED, STAT_N };
 typedef struct { uint32_t node; uint8_t alive; uint64_t v[STAT_N]; } node_stats_t;
 typedef node_stats_t dsm_stats_t;
-
+ 
 typedef struct {
     uint64_t faults_read, faults_write, pages_received, invalidations, fetches_served;
     uint64_t fetches_delayed, punched, retries;
 } pager_stats_t;
-
+ 
 typedef struct { uint64_t page; uint32_t owner; uint64_t copyset; uint8_t dirty; } dir_snap_t;
-
+ 
 /* Entrada de la tabla de asignaciones (en el coordinador, nodo 0) */
 typedef struct {
     uint32_t node, pid, seq; uint8_t live;
     uint64_t addr, size; char name[DSM_NAME_LEN];
 } alloc_entry_t;
-
+ 
 /* ---- config.c ---- */
 dsm_err_t config_load(const char *path, dsm_config_t *out);
 const dsm_config_t *config_get(void);
-
+ 
 /* ---- cluster.c ---- */
 extern int dsm_verbose;
 dsm_err_t cluster_init(const dsm_config_t *cfg);
@@ -160,15 +161,15 @@ node_id_t cluster_alloc_coord(void);
 void      cluster_set_local_tasks(uint32_t load);        /* [Extra 1] lo llama tasks.c */
 uint32_t  cluster_tasks_running(node_id_t id);
 uint32_t  cluster_load100(node_id_t id);
-
+ 
 #define DSM_LOG(...) do { if (dsm_verbose) { \
     fprintf(stderr, "[dsm n%u] ", (unsigned)cluster_self_id()); \
     fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } } while (0)
-
+ 
 /* ---- network.c ---- */
 typedef enum { MSG_INLINE, MSG_POOL, MSG_POOL_WAIT } msg_class_t;
 typedef void (*msg_handler_t)(const msg_header_t *h, const void *payload);
-
+ 
 dsm_err_t net_init(const dsm_config_t *cfg);
 void      net_shutdown(void);
 void      net_register(msg_type_t type, msg_handler_t fn, msg_class_t cls);
@@ -181,7 +182,7 @@ dsm_err_t net_rpc_call(node_id_t dst, msg_type_t type, uint8_t access, uint64_t 
                        const void *payload, uint32_t plen, void *reply, uint32_t *rlen,
                        uint32_t timeout_ms);
 void      net_get_counters(uint64_t *tx_msgs, uint64_t *rx_msgs, uint64_t *tx_bytes);
-
+ 
 /* ---- pager.c (A) ---- */
 dsm_err_t pager_init(const dsm_config_t *cfg);
 void      pager_shutdown(void);
@@ -196,7 +197,7 @@ void      pager_release_all(void);                       /* write-back al apagar
 void      pager_on_page_data(const msg_header_t *h, const void *page_bytes);
 dsm_err_t pager_on_invalidate(page_id_t page);
 dsm_err_t pager_on_fetch(page_id_t page, access_t for_access, void *out);
-
+ 
 /* ---- directory.c ---- */
 dsm_err_t dir_init(const dsm_config_t *cfg);
 void dir_shutdown(void);
@@ -207,7 +208,7 @@ void dir_on_writeback(const msg_header_t *h, const void *page_bytes);
 void dir_on_release(const msg_header_t *h, const void *page_bytes);
 uint32_t dir_snapshot(page_id_t first, dir_snap_t *out, uint32_t max, page_id_t *next);
 uint64_t dir_count(void);
-
+ 
 /* ---- stats.c ---- */
 dsm_err_t stats_init(void);
 dsm_err_t dsm_stats(dsm_stats_t *out);                       /* este nodo */
@@ -217,7 +218,7 @@ void      dsm_print_local_pages(FILE *f, unsigned max);
 void      dsm_print_global_pages(FILE *f, unsigned max_per_node);
 void      dsm_print_allocs(FILE *f);
 dsm_err_t dsm_write_html(const char *path);
-
+ 
 /* ---- ejecucion distribuida de tareas (tasks.c) [Extra 1] ---- */
 #define DSM_TASK_MAX_ARGS 256
 #define DSM_ANY_NODE      (-1)
@@ -234,7 +235,7 @@ dsm_err_t dsm_spawn(uint32_t func_id, const void *args, uint32_t len, int32_t no
 dsm_err_t dsm_wait(dsm_task_t task, int64_t *result);            /* libera el registro de la tarea */
 dsm_err_t dsm_wait_all(const dsm_task_t *tasks, uint32_t n, int64_t *results);
 dsm_err_t dsm_task_status(dsm_task_t task, dsm_task_state_t *state);
-
+ 
 /* ---- API publico (dsm.c) ---- */
 dsm_err_t dsm_init(const char *config_path);               /* nodo propio: env DSM_NODE_ID */
 void     *dsm_alloc(size_t size);
@@ -249,5 +250,6 @@ dsm_err_t dsm_shutdown(void);
 void     *dsm_slot_base(node_id_t node);
 dsm_err_t dsm_last_error(void);
 dsm_err_t dsm_alloc_list(uint64_t first, alloc_entry_t *out, uint32_t max, uint32_t *count, uint64_t *next);
-
+ 
 #endif
+ 
