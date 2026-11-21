@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
+#include "../lib/libdsm_math.h"
 typedef struct { double *A, *B, *C; int32_t N, r0, r1; } mm_args_t;
 static int64_t mm_task(const void *a, uint32_t len) {
     (void)len; mm_args_t m; memcpy(&m, a, sizeof m);
@@ -39,7 +39,7 @@ int main(int argc, char **argv) {
         for (int i = 0; i < nt; i++) if (rs[i] >= 0 && rs[i] < (int64_t)nn) per[rs[i]]++;
         for (int i = 0; i < N && !bad; i++) for (int j = 0; j < N; j++) {
             double s = 0; for (int k = 0; k < N; k++) s += ((i + k) % 7) * (double)((k * 3 + j) % 5);
-            if (fabs(s - Cm[(size_t)i * N + j]) > 1e-9) { fprintf(stderr, "FALLO C[%d][%d]\n", i, j); bad = 1; break; }
+            if (dsm_fabs(s - Cm[(size_t)i * N + j]) > 1e-9) { fprintf(stderr, "FALLO C[%d][%d]\n", i, j); bad = 1; break; }
         }
         printf("[n0] app_tasks N=%d, %d tareas en %u nodos (", N, nt, nn);
         for (uint32_t n = 0; n < nn; n++) printf("%snodo%u=%d", n ? " " : "", n, per[n]);
