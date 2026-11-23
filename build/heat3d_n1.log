@@ -1,0 +1,3 @@
+[n1 ip=127.0.0.1] app_heat3d NX=64 NY=8 NZ=2048 steps=8 nodos=2 memoria=16.01 MiB
+[n1 ip=127.0.0.1] stats_local: I=6142 S=3 M=2047 faultR=528 faultW=3086 rx=3614 inv=8 fetch=6171 punch=8 txMsg=7496 txBytes=20153555
+[n1 ip=127.0.0.1] RESULTADO: PASS

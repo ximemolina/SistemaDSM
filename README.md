@@ -28,7 +28,7 @@ El detalle verificable de cada módulo, con referencias `archivo:línea`, está 
 - **Extra 1: ejecución distribuida de tareas** (`dsm_spawn`/`dsm_wait`, planificación por carga, reintento si cae el nodo). Implementación en `src/tasks.c`; detalle en `docs/CONTEXTO_IA.md` §4.8. (`docs/EXTRA1.md` es una lista de pendientes, no una especificación de tareas.)
 - No incluye tolerancia a fallos (Extra 2). Limitaciones y decisiones en `docs/AVANCE3.md` §4 y correcciones en §6. **No existe `docs/CORRECCIONES.md`** pese a las referencias antiguas en `docs/AVANCE3.md:10,56`.
 
-**Estado del árbol:** las aplicaciones `app_matmul` y `app_counter` (documentadas en `docs/AVANCE3.md:20-21`) y los scripts `gen_conf.sh`, `run_n.sh`, `run_all.sh` **no están versionados**. Las fuentes de app presentes son `apps/test_basic.c`, `apps/test_task.c` y `apps/app_tasks.c`; el único script es `scripts/run_local.sh`. Consulta `docs/CONTEXTO_IA.md` §1-3 antes de intentar reproducir la batería de pruebas.
+**Estado del árbol:** las aplicaciones `app_matmul` y `app_counter` (documentadas en `docs/AVANCE3.md:20-21`) y los scripts `gen_conf.sh`, `run_n.sh`, `run_all.sh` **no están versionados**. Las fuentes de app presentes son `apps/test_basic.c`, `apps/test_task.c`, `apps/app_tasks.c`, `apps/app_pagerank.c` y `apps/app_heat3d.c`. Los scripts son `scripts/run_local.sh`, `run_apps.sh` y `run_3nodes.sh`. La demo de apps de gran memoria está en `docs/DEMO_APPS.md`.
 
 ## Requisitos
 
@@ -39,11 +39,11 @@ El detalle verificable de cada módulo, con referencias `archivo:línea`, está 
 ## Instalación y compilación
 
 ```sh
-make build/dsm_node build/print_sizes build/test_basic build/test_task build/app_tasks
-./scripts/run_local.sh dsm.conf        # 2 nodos de test_basic en 127.0.0.1:9101/9102
+make
+./scripts/run_local.sh dsm.local.conf  # 2 nodos de test_basic, pero dsm.local.conf apunta a 127.0.0.1
 ```
 
-`make` solo (target `all`) intenta los 10 binarios declarados en `Makefile:9` y se detiene porque faltan `apps/test_stress.c`, `test_hb.c`, `test_leave.c`, `test_tasks.c`, `app_matmul.c` y `app_counter.c`. `make test` ejecuta `./scripts/run_all.sh`, que tampoco existe: usa los comandos anteriores.
+`make` compila los 7 binarios declarados en `Makefile:11`. `make test` ejecuta `./scripts/run_local.sh dsm.conf`; en una sola máquina usa directamente `./scripts/run_local.sh dsm.local.conf`.
 
 Si la carpeta está en una partición montada sin permiso de ejecución, copie el proyecto a otra ruta (por ejemplo `~/dsm`).
 
@@ -100,11 +100,25 @@ DSM_NODE_ID=2 ./build/test_task dsm.conf
 # Otra app disponible: app_tasks (compila desde apps/app_tasks.c)
 make build/app_tasks
 DSM_NODE_ID=0 ./build/app_tasks dsm.conf 96
+
+# Apps de gran memoria en DOS MAQUINAS (una terminal por máquina)
+./scripts/setup_lab.sh <ip_nodo0> <ip_nodo1>       # una sola vez; copie dsm.conf y dsm.lab2.conf a ambas
+# Maquina A:
+./scripts/run_lab_node.sh app_pagerank dsm.conf 0 131072 16 12
+# Maquina B:
+./scripts/run_lab_node.sh app_pagerank dsm.conf 1 131072 16 12
+# Segunda app, en paralelo y con otros puertos:
+./scripts/run_lab_node.sh app_heat3d dsm.lab2.conf 0 2048 8    # maquina A
+./scripts/run_lab_node.sh app_heat3d dsm.lab2.conf 1 2048 8    # maquina B
 ```
+
+Detalle completo de investigación, adaptación, escenarios, métricas y guion de demo:
+`docs/DEMO_APPS.md`. Para smoke tests en una sola máquina: `./scripts/run_apps.sh` o
+`./scripts/run_3nodes.sh`.
 
 Los binarios `test_stress`, `test_hb`, `test_leave`, `test_tasks`, `app_matmul` y `app_counter` que aparecen en informes antiguos no se pueden lanzar porque no hay fuente para ellos en `apps/`.
 
-En computadoras distintas: ponga las IP o nombres reales en `dsm.conf`, copie el mismo archivo a cada una y arranque un nodo por máquina. `DSM_VERBOSE=1` imprime contadores y eventos de membresía.
+En computadoras distintas: use `scripts/setup_lab.sh` para fijar las IP reales, copie el mismo `dsm.conf` (y `dsm.lab2.conf`) a cada una, recompile ahí mismo y arranque un nodo por máquina con `scripts/run_lab_node.sh`. `DSM_VERBOSE=1` imprime contadores y eventos de membresía.
 
 ### Nodo interactivo y consultas
 
@@ -150,11 +164,12 @@ Reglas para las aplicaciones: usar `dsm_alloc*` (no `malloc`) para los datos com
 
 ```
 src/        config.c cluster.c network.c pager.c directory.c dsm.c stats.c tasks.c main.c internal.h
-apps/       test_basic.c, test_task.c, app_tasks.c   (solo estos 3)
+apps/       test_basic.c, test_task.c, app_tasks.c, app_pagerank.c, app_heat3d.c
 tools/      print_sizes.c (imprime 6 tamaños; su page_local_t no es la del pager)
-scripts/    run_local.sh   (solo este)
-docs/       AVANCE1.md, AVANCE2.md, AVANCE3.md, EXTRA1.md, TODO.md, CONTEXTO_IA.md
-Makefile    dsm.conf       README.md
+scripts/    run_local.sh, run_apps.sh, run_3nodes.sh, run_lab_node.sh, setup_lab.sh
+configs     dsm.conf, dsm.lab2.conf, dsm.local.conf, dsm.local2.conf, dsm.local3.conf, dsm.local.big.conf
+docs/       AVANCE1.md, AVANCE2.md, AVANCE3.md, EXTRA1.md, DEMO_APPS.md
+Makefile    README.md
 ```
 
 | Módulo | Contenido |

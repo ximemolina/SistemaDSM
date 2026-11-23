@@ -8,7 +8,7 @@ CFLAGS += -DDSM_STATE_FALLBACK
 endif
 LIB     := src/config.c src/cluster.c src/network.c src/pager.c src/directory.c src/dsm.c src/stats.c src/tasks.c
 MATHLIB := build/libdsm_math.a
-BINS    := test_basic test_task app_tasks dsm_node print_sizes
+BINS    := test_basic test_task app_tasks app_pagerank app_heat3d dsm_node print_sizes
 
 all: $(addprefix build/,$(BINS))
 

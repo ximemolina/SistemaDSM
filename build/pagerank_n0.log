@@ -1,0 +1,18 @@
+[n0 ip=127.0.0.1] app_pagerank N=131072 DEG=16 E=2097152 nodos=2 memoria=10.51 MiB
+[n0] iter=1 L1=0.074244283
+[n0] iter=2 L1=0.007517176
+[n0] iter=3 L1=0.006389600
+[n0] iter=4 L1=0.005431160
+[n0] iter=5 L1=0.004616486
+[n0] iter=6 L1=0.003924013
+[n0] iter=7 L1=0.003335411
+[n0] iter=8 L1=0.002835099
+[n0] iter=9 L1=0.002409834
+[n0] iter=10 L1=0.002048359
+[n0] iter=11 L1=0.001741105
+[n0] iter=12 L1=0.001479940
+[n0] suma=1.000000000 esperada=1.000000000 iter=12 estructura=OK: OK
+[n0 ip=127.0.0.1] stats_local: I=6718 S=258 M=1216 faultR=1549 faultW=2772 rx=4321 inv=0 fetch=7094 punch=0 txMsg=9441 txBytes=23718846
+[n0] stats n0: I=6718 S=258 M=1216 faultR=1549 faultW=2772 rx=4321 inv=0 fetch=7094 punch=0 txMsg=9441 txBytes=23718846
+[n0] stats n1: I=6717 S=258 M=1217 faultR=1556 faultW=2766 rx=4322 inv=1426 fetch=1549 punch=1426 txMsg=10257 txBytes=15676031
+[n0 ip=127.0.0.1] RESULTADO: PASS
