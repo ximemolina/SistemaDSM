@@ -1,0 +1,14 @@
+[n0 ip=127.0.0.1] app_heat3d NX=64 NY=8 NZ=2048 steps=8 nodos=2 memoria=16.01 MiB
+[n0] step=1 suma=38885212.080000
+[n0] step=2 suma=38885212.080000
+[n0] step=3 suma=38885212.080000
+[n0] step=4 suma=38885212.080000
+[n0] step=5 suma=38885212.080000
+[n0] step=6 suma=38885212.080000
+[n0] step=7 suma=38885212.080000
+[n0] step=8 suma=38885212.080000
+[n0] error maximo=0.000000000000 manufacturado=OK
+[n0 ip=127.0.0.1] stats_local: I=6141 S=3 M=2048 faultR=527 faultW=3088 rx=3615 inv=518 fetch=1058 punch=1030 txMsg=7746 txBytes=10672620
+[n0] stats n0: I=6141 S=3 M=2048 faultR=527 faultW=3088 rx=3615 inv=518 fetch=1058 punch=1030 txMsg=7746 txBytes=10672620
+[n0] stats n1: I=6142 S=3 M=2047 faultR=528 faultW=3086 rx=3614 inv=8 fetch=6171 punch=8 txMsg=7496 txBytes=20153555
+[n0 ip=127.0.0.1] RESULTADO: PASS

@@ -1,0 +1,3 @@
+[n1 ip=127.0.0.1] app_pagerank N=16384 DEG=16 E=262144 nodos=2 memoria=1.32 MiB
+[n1 ip=127.0.0.1] stats_local: I=8005 S=33 M=154 faultR=72 faultW=222 rx=294 inv=54 fetch=68 punch=54 txMsg=684 txBytes=916433
+[n1 ip=127.0.0.1] RESULTADO: PASS
