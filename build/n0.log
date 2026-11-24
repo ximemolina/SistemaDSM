@@ -1,6 +1,0 @@
-[dsm n0] nodo 1 ahora VIVO
-[dsm n0] fallos R=54 W=103 | paginas recibidas=155 | invalidaciones=1 | fetch=205 (retenidos 53) | punch=1 | reintentos=0
-[n0] Test A (ping-pong x100): OK
-[n0] Test D (pagina del contribuyente): OK
-[n0] Test B (estres, 2 hilos/nodo, misma pagina): OK
-[n0] RESULTADO: PASS

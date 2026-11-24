@@ -153,7 +153,7 @@ dsm_shutdown();                             /* devuelve las páginas modificadas
 | `dsm_alloc`, `dsm_alloc_named`, `dsm_free` | Devuelven `NULL` en error; `dsm_last_error()` da el código. `dsm_free` no reutiliza la memoria |
 | `dsm_barrier(id, n)`, `dsm_lock(id)`, `dsm_unlock(id)` | `n = 0` o `n > max_nodes` da `DSM_ERR_BAD_ARG`; participante caído da `DSM_ERR_TIMEOUT` |
 | `dsm_prefetch_write/read(ptr, len)` | Pistas de rendimiento |
-| `dsm_register_task`, `dsm_spawn`, `dsm_wait`, `dsm_wait_all`, `dsm_task_status` | Ejecución distribuida (Extra 1), implementación en `src/tasks.c` |
+| `dsm_register_task`, `dsm_spawn`, `dsm_wait`, `dsm_waitin_all`, `dsm_task_status` | Ejecución distribuida (Extra 1), implementación en `src/tasks.c` |
 | `dsm_stats`, `dsm_stats_node`, `dsm_print_stats`, `dsm_print_local_pages`, `dsm_print_global_pages`, `dsm_print_allocs`, `dsm_write_html` | Consultas |
 
 Códigos de error: `DSM_ERR_NOMEM`, `DSM_ERR_TIMEOUT`, `DSM_ERR_NODE_DOWN`, `DSM_ERR_BAD_ARG`, `DSM_ERR_PROTO`, `DSM_ERR_IO`.
