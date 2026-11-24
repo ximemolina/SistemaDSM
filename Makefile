@@ -8,8 +8,8 @@ CFLAGS += -DDSM_STATE_FALLBACK
 endif
 LIB     := src/config.c src/cluster.c src/network.c src/pager.c src/directory.c src/dsm.c src/stats.c src/tasks.c
 MATHLIB := build/libdsm_math.a
-LDLIBS  := -lm
-BINS    := test_basic test_task app_tasks app_pagerank app_heat3d dsm_node print_sizes
+LDLIBS  := -lm -lrt
+BINS := test_basic test_task app_tasks app_pagerank app_heat3d test_msi test_locks test_alloc test_edge dsm_node print_sizes
 
 all: $(addprefix build/,$(BINS))
 
@@ -26,7 +26,7 @@ build/dsm_node: src/main.c $(LIB) $(MATHLIB) src/internal.h | build
 build/print_sizes: tools/print_sizes.c $(MATHLIB) src/internal.h | build
 > $(CC) $(CFLAGS) -o $@ tools/print_sizes.c $(MATHLIB) $(LDLIBS)
 
-build/%: apps/%.c $(LIB) $(MATHLIB) src/internal.h | build
+build/%: apps/%.c apps/test_util.h $(LIB) $(MATHLIB) src/internal.h | build
 > $(CC) $(CFLAGS) -o $@ $< $(LIB) $(MATHLIB) $(LDLIBS)
 
 test: all

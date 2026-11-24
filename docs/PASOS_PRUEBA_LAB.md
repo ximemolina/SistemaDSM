@@ -1,423 +1,197 @@
-# Pasos realizados para validar el DSM (23-nov-2026)
+# Guía para ejecutar todas las pruebas del DSM (24-nov-2026)
 
-Registro cronológico de la sesión de pruebas de Susana Feng con apoyo de una IA. Complementa a `CONTEXTO_IA.md` (§14 y Apéndice A). Cada paso indica qué se hizo, qué salió y qué se concluyó. Lo que **no** se ejecutó o no tiene salida pegada se marca como tal.
+Cómo correr **todas** las pruebas del proyecto en las 2 computadoras del laboratorio y qué evidencia guardar para la revisión. Complementa a `PASOS_VALIDACION` (23-nov) y a `CONTEXTO_IA.md`.
+
+> **Estado honesto:** los tests nuevos (`test_msi`, `test_locks`, `test_alloc`, `test_edge`) y `run_suite.sh` se escribieron contra `internal.h` pero **todavía no se han compilado ni ejecutado**. La columna "Estado" de abajo se llena con las corridas reales.
 
 ## Resumen
 
-| Fase | Qué se probó | Resultado |
-|---|---|---|
-| 0 | Entorno y compilación (WSL2) | OK: x86_64, kernel 6.6, glibc 2.39, 12 núcleos; compila sin errores |
-| 1 | E01: 2 nodos en una máquina | PASS, `n0=0 n1=0` |
-| 2 | Revisión del estado real del repo | Documento desactualizado (puertos, `lib/`, offset UDP) |
-| 3 | Preparación de red entre 2 equipos | TCP reportado OK; UDP **no verificado** |
-| 4 | Tropiezos en el equipo del laboratorio | Dos errores resueltos (binario sin permiso, config ausente) |
-| 5 | E13: `test_basic` en 2 computadoras | PASS en ambas, `exit=0` |
-| 6 | Verificación de que eran equipos distintos | Confirmado por IPs y configuración |
+| Fase | Qué se prueba | Nodos | Esperado | Estado |
+|---|---|---|---|---|
+| 0 | Compilación limpia en ambas máquinas | – | sin errores | ☐ |
+| 1 | Red: ping, TCP y **UDP** entre máquinas | – | UDP recibido | ☐ |
+| 2 | `test_basic` (ping-pong, estrés) | 2 | `RESULTADO: PASS`, exit 0 | ☐ |
+| 3 | Batería principal en 4 nodos | 4 | `SUITE: TODO PASS` | ☐ |
+| 4 | Repetición (fallos intermitentes) | 4 | 30/30 PASS | ☐ |
+| 5 | Escala con 16 nodos | 16 | PASS | ☐ |
+| 6 | Evidencia de uso de la API | 4 | stats ≠ 0, HTML | ☐ |
 
----
+## Fase 0. Preparación
 
-## Fase 0. Entorno y compilación
+Máquinas: **A = 172.19.12.81** y **B = 172.19.12.48** (misma subred).
 
-En el portátil de Susana (WSL2):
+1. Copiar `test_util.h`, `test_msi.c`, `test_locks.c`, `test_alloc.c`, `test_edge.c` a `apps/` (junto a los demás tests), y `run_suite.sh` a la raíz del repo. Los `#include "../src/internal.h"` de los archivos nuevos ya funcionan desde `apps/`.
+2. En el `Makefile`, **no hace falta una regla nueva**: la regla genérica `build/%: apps/%.c` ya compila cualquier archivo de `apps/`. Solo hay que añadir los nombres a `BINS` y, para que un cambio en `test_util.h` recompile los tests, añadirlo como dependencia:
 
-```sh
-uname -m && uname -r && ldd --version | head -1 && nproc
-make build/dsm_node build/print_sizes build/test_basic build/test_task build/app_tasks
-```
-
-Salida relevante: `x86_64`, `6.6.87.2-microsoft-standard-WSL2`, `ldd (Ubuntu GLIBC 2.39-0ubuntu8.12) 2.39`, `12`.
-
-Observaciones:
-- Cumple los requisitos del §12 (x86-64, kernel ≥ 4.17).
-- El `make` compiló también `lib/libdsm_math.c` y generó `build/libdsm_math.a`, que el documento original no mencionaba.
-- Hay 12 núcleos, no 1 como decía `README.md:165`.
-
-## Fase 1. E01: 2 nodos en una sola máquina
-
-```sh
-DSM_VERBOSE=1 ./scripts/run_local.sh dsm.conf
-```
-
-Resultado: `Test A (ping-pong x100): OK`, `Test D: OK`, `Test B: OK`, `RESULTADO: PASS` en los dos nodos, `codigos de salida: n0=0 n1=0`, `reintentos=0`.
-
-| Nodo | Fallos R/W | Páginas recibidas | Invalidaciones | Fetch | Punch |
-|---|---|---|---|---|---|
-| n0 | 54 / 103 | 155 | 1 | 205 | 1 |
-| n1 | 53 / 103 | 154 | 51 | 104 | 50 |
-
-Conclusión: E01 confirmada. El asimetrismo de contadores entre nodos es esperable (los homes de las páginas se reparten por hash).
-
-## Fase 2. Revisión del estado real del repo
-
-Se pidió `ls apps scripts lib` y `git log --oneline | head`, y luego `cat dsm.conf` y `git show --stat` de tres commits.
-
-Hallazgos:
-- `apps/` y `scripts/` siguen como describe el documento (3 apps y `run_local.sh`).
-- Existe `lib/libdsm_math.c/.h` (commit `1904632`, "Eliminar bibliotecas externas").
-- El commit `abb097d` (contexto del proyecto) es **anterior** a tres cambios: `56b7409` (puertos y más nodos), `1904632` (librería) y `7ef3eae` (direcciones IP).
-- `dsm.conf` ahora usa puertos **27800/27801** y `heartbeat_port_offset = 10`, por lo que el UDP es 27810/27811 (el documento decía 9101/9102 y `+1000`).
-- `dsm.conf` tiene activas las líneas `127.0.0.1` y comentadas las del laboratorio (`172.19.12.81` y `172.19.12.48`).
-
-Conclusión: se corrigió `CONTEXTO_IA.md` en puertos, offset UDP, `lib/`, `Makefile` y número de núcleos.
-
-## Fase 3. Preparación de la red entre dos equipos
-
-Se descartó una hipótesis inicial de la IA (que las IPs `172.19.x.x` fueran de WSL2 con NAT), porque Susana indicó que las sacó directamente de los dispositivos. Después `ip` mostró que son las IPs de `eno1` de los equipos del laboratorio.
-
-Prueba de conectividad propuesta:
-
-```sh
-# Equipo nodo 1
-python3 -m http.server 27801 --bind 0.0.0.0
-# Equipo nodo 0
-ping -c 3 172.19.12.48
-curl -m 5 http://172.19.12.48:27801 | head -3
-```
-
-Resultado: Susana respondió "sí funciona". **No se pegaron las salidas**, así que queda como reportado, no capturado.
-
-**Pendiente:** la prueba de UDP (`nc -u`) se propuso, pero no se registró su resultado. Eso importa porque el heartbeat usa UDP y `curl` solo prueba TCP.
-
-## Fase 4. Tropiezos en el equipo del laboratorio
-
-### 4.1 `Permiso denegado`
-
-```text
-curso@soporte:~/Descargas/SistemaDSM-main$ ls -l build/test_basic dsm_lab.conf
-ls: no se puede acceder a 'dsm_lab.conf': No existe el archivo o el directorio
--rw-rw-r-- 1 curso curso 282016 nov 23 14:13 build/test_basic
+```make
+BINS := test_basic test_task app_tasks app_pagerank app_heat3d test_msi test_locks test_alloc test_edge dsm_node print_sizes
 ...
-bash: ./build/test_basic: Permiso denegado
-exit=126
+build/%: apps/%.c apps/test_util.h $(LIB) $(MATHLIB) src/internal.h | build
+> $(CC) $(CFLAGS) -o $@ $< $(LIB) $(MATHLIB) $(LDLIBS)
 ```
 
-- Causa: el binario no tenía bit de ejecución (`-rw-rw-r--`). La carpeta `SistemaDSM-main` parece un zip de GitHub y probablemente traía un `build/` ajeno (hipótesis, no verificada).
-- Arreglo indicado: `rm -rf build` y recompilar con `make build/dsm_node build/test_basic build/app_tasks`. No se pegó la salida de ese `make`, pero el binario ejecutó después.
-
-### 4.2 `config_load: No such file or directory`
-
-```text
-DSM_VERBOSE=1 DSM_NODE_ID=1 ./build/test_basic dsm_lab.conf
-config_load: No such file or directory
-dsm_init fallo
-exit=1
-```
-
-- Causa: `dsm_lab.conf` se había creado solo en la otra máquina.
-- Arreglo: crear el archivo en cada equipo, o usar `dsm.conf` (que ya traía las IPs del laboratorio activas). Se usó `dsm.conf`.
-
-### 4.3 Sobre el archivo `dsm_lab.conf`
-
-Susana preguntó por qué no usar `dsm.conf` directamente. Respuesta: no hay razón técnica. El archivo aparte solo evitaba modificar un archivo versionado y mantenía el caso local (E01) intacto. Lo único que importa es que las dos máquinas carguen configuración equivalente (`grep -vE '^\s*(#|$)' dsm.conf | md5sum`).
-
-## Fase 5. E13: `test_basic` en dos computadoras
-
-Se lanzó un proceso por equipo, con pocos segundos de diferencia, usando `dsm.conf` con las IPs reales:
+   (Nombre del binario de tareas: `test_task`, sin "s".)
+3. En **ambas** máquinas:
 
 ```sh
-DSM_VERBOSE=1 DSM_NODE_ID=<id> ./build/test_basic dsm.conf 2>&1 | tee build/lab_n<id>.log; echo "exit=${PIPESTATUS[0]}"
+chmod +x run_suite.sh scripts/*.sh lab.sh
+rm -rf build && make
+ls -l build/test_basic build/test_task build/app_tasks build/app_pagerank build/app_heat3d \
+      build/test_msi build/test_locks build/test_alloc build/test_edge
 ```
 
-**Nodo 1:**
-```text
-[dsm n1] nodo 0 ahora VIVO
-[dsm n1] fallos R=66 W=103 | paginas recibidas=167 | invalidaciones=38 | fetch=104 (retenidos 59) | punch=63 | reintentos=0
-[n1] Test A (ping-pong x100): OK
-[n1] Test D (pagina del contribuyente): OK
-[n1] Test B (estres, 2 hilos/nodo, misma pagina): OK
-[n1] RESULTADO: PASS
-exit=0
-```
+Todos deben aparecer con `-rwx`. Si salta `Permiso denegado` (exit 126), es el `build/` ajeno del zip: `rm -rf build` y recompilar.
 
-**Nodo 0:**
-```text
-[dsm n0] nodo 1 ahora VIVO
-[dsm n0] fallos R=41 W=103 | paginas recibidas=142 | invalidaciones=1 | fetch=205 (retenidos 38) | punch=1 | reintentos=0
-[n0] Test A (ping-pong x100): OK
-[n0] Test D (pagina del contribuyente): OK
-[n0] Test B (estres, 2 hilos/nodo, misma pagina): OK
-[n0] RESULTADO: PASS
-exit=0
-```
-
-## Fase 6. ¿Eran realmente dos computadoras?
-
-Los dos logs tenían el mismo prompt (`curso@soporte`) y contadores casi iguales a los de E01 en local, lo que generó una duda razonable. Se verificó con:
+4. Comprobar que las dos máquinas tienen la **misma** configuración:
 
 ```sh
-hostname
-ip -4 addr show | grep inet
-grep -vE '^\s*(#|$)' dsm.conf
+md5sum dsm2.conf dsm4.conf dsm16.conf
 ```
 
-| | Equipo A | Equipo B |
-|---|---|---|
-| hostname | `soporte` | `soporte` |
-| IP en `eno1` | `172.19.12.81/23` | `172.19.12.48/23` |
-| Configuración activa | idéntica | idéntica |
+## Archivos de configuración
 
-Conclusión: son dos equipos distintos (clonados, de ahí el mismo hostname), cada uno con la IP de su línea `node=`, en la misma subred. Como `172.19.12.48` solo existe en un equipo, el `JOIN` del nodo 0 tuvo que cruzar la red.
+Todas comparten: `page_size = 4096`, `mem_per_node = 16M`, `global_base_addr = 0x700000000000`, `worker_pool_size = 8`, `request_timeout_ms = 5000`, `barrier_timeout_ms = 60000`, `heartbeat_port_offset = 10`, `hash_seed = 0`. Si `wait_all_nodes` no vale 1 por defecto, añadir `wait_all_nodes = 1`.
 
-Corrección de la sesión: en un momento se afirmó que "el tráfico TCP y UDP cruzó la red". Eso sobrepasaba la evidencia: `nodo X ahora VIVO` puede venir del `JOIN` por TCP, y el UDP no se probó de forma explícita.
-
-## Qué quedó verificado y qué no
-
-**Verificado:**
-- Compilación y ejecución en WSL2 (12 núcleos) y en dos equipos Linux nativos.
-- E01 (2 nodos, una máquina): PASS.
-- E13 (2 computadoras, misma subred, `test_basic`, una corrida): PASS en ambas.
-
-**No verificado:**
-- UDP/heartbeat entre máquinas de forma explícita.
-- 3 o más nodos (`test_task` necesita 3).
-- Repetibilidad: una sola corrida buena no descarta fallos intermitentes (el §7 recomienda 15–30).
-- `app_tasks` entre máquinas.
-- Caída real de un nodo entre máquinas (E10/E11).
-- Nombres de host (solo se usaron IPs), WSL2 entre máquinas, 16 nodos.
-- Casos E02–E12: se propusieron comandos para E02, E04–E07, pero **no hay salidas registradas**, por lo que siguen pendientes.
-
-## Siguientes pasos sugeridos (en orden)
-
-1. Probar UDP: `nc -u -l 27811` en un equipo y `echo hola | nc -u -w1 172.19.12.48 27811` en el otro.
-2. `app_tasks` entre los dos equipos:
-   ```sh
-   DSM_VERBOSE=1 DSM_NODE_ID=<id> ./build/app_tasks dsm.conf 96 2>&1 | tee build/lab_tasks_n<id>.log; echo "exit=${PIPESTATUS[0]}"
-   ```
-   Esperado: `app_tasks N=96 ... PASS` en el nodo 0 y `exit=0` en ambos.
-3. Repetir `test_basic` 10 veces en cada equipo:
-   ```sh
-   for i in $(seq 1 10); do
-     DSM_NODE_ID=<id> ./build/test_basic dsm.conf > build/rep_$i.log 2>&1
-     echo "iter $i exit=$?"; sleep 3
-   done
-   ```
-4. En el portátil (una sola máquina): E02, E04–E07 (rápidos) y E12 (12 núcleos con `worker_pool_size` 1, 4 y 8).
-5. Si hay una tercera máquina: `test_task` (E08).
-6. E10: `kill -9` del nodo 1 en pleno `test_basic` y capturar los dos logs.
-7. Antes de la demo (27 de noviembre): si se usará WSL2, resolver la red (modo *mirrored* o reenvío de puertos); si se usará Linux nativo como en el laboratorio, no aplica.
-
-
-``` ################################################################################################### ```
-``` PRUEBA CON EL SCRIPT lab.sh ```
-
-# Análisis del script `lab.sh`
-
-Este script es una herramienta de pruebas y diagnóstico para el proyecto distribuido. Su función principal es leer la configuración desde `dsm.conf`, identificar qué nodo es la máquina actual y ejecutar distintos tests de conectividad y funcionamiento.
-
----
-
-## Funcionamiento general
-
-Al iniciar, el script:
-
-1. Se mueve al directorio donde se encuentra el script.
-2. Crea el directorio `build/` si no existe.
-3. Busca el archivo `dsm.conf`.
-4. Lee la configuración de los nodos (`node=`).
-5. Obtiene las IPs de la máquina local.
-6. Compara las IPs locales con las configuradas para determinar cuál nodo corresponde a esta máquina.
-
-Por ejemplo:
+**`dsm2.conf`** (2 nodos, una máquina cada uno; es el `dsm.conf` actual):
 
 ```ini
-node=1 192.168.1.10 5000
-node=2 192.168.1.11 5000
+max_nodes = 2
+node = 0 172.19.12.81 27800
+node = 1 172.19.12.48 27801
 ```
 
-Si la máquina tiene la IP `192.168.1.10`, el script determinará que corresponde al nodo 1.
+**`dsm4.conf`** (4 nodos, 2 por máquina; los mensajes entre máquinas siguen cruzando la red):
 
----
-
-# Modo `info`
-
-```bash
-bash lab.sh info
+```ini
+max_nodes = 4
+node = 0 172.19.12.81 27800
+node = 1 172.19.12.81 27801
+node = 2 172.19.12.48 27800
+node = 3 172.19.12.48 27801
 ```
 
-Muestra información de diagnóstico del entorno:
+**`dsm16.conf`** (16 nodos, 8 por máquina): `max_nodes = 16`; nodos 0–7 en 172.19.12.81 con puertos 27800–27807, nodos 8–15 en 172.19.12.48 con puertos 27800–27807. El UDP usa puerto + 10.
 
-- Fecha actual.
-- Nombre del host.
-- Arquitectura del procesador.
-- Versión del kernel.
-- Número de CPUs.
-- Último commit de Git.
-- Hash MD5 del código fuente.
-- Hash MD5 del archivo de configuración.
-- Direcciones IP locales.
-- Identificador del nodo detectado.
-- Existencia de:
-  - `build/test_basic`
-  - `build/app_tasks`
-- Estado del firewall (`ufw`) si está instalado.
-- Prueba de conectividad mediante `ping` a los demás nodos.
+Regla: `max_nodes` debe coincidir con el número de líneas `node=`, y el nodo propio se elige con la variable `DSM_NODE_ID` (no por IP).
 
-**Uso recomendado:** verificar que el entorno esté correctamente configurado antes de realizar pruebas.
+## Fase 1. Red (incluye el pendiente de UDP)
 
----
-
-# Modo `udp-recv`
-
-```bash
+```sh
+bash lab.sh info                  # ambas máquinas: IPs, nodo detectado, ping al otro
+# Máquina B:
 bash lab.sh udp-recv
-```
-
-Abre un socket UDP y escucha durante 30 segundos en el puerto:
-
-```text
-puerto_configurado + heartbeat_port_offset
-```
-
-Por cada mensaje recibido muestra:
-
-```text
-RECIBIDO de 192.168.1.20 : hola desde nodo 2 #1
-```
-
-Al finalizar indica cuántos mensajes recibió.
-
-**Uso recomendado:** comprobar que otros nodos pueden enviar paquetes UDP correctamente.
-
----
-
-# Modo `udp-send`
-
-```bash
+# Máquina A (mientras B escucha):
 bash lab.sh udp-send
 ```
 
-Envía mensajes UDP a todos los nodos definidos en `dsm.conf`, excepto al nodo local.
+Esperado: en B aparecen líneas `RECIBIDO de 172.19.12.81 : hola desde nodo 0 #1` … `#5`. Repetir en sentido contrario. Esto cierra el pendiente "UDP no verificado" (el heartbeat usa UDP; `curl` solo prueba TCP).
 
-Envía cinco mensajes por cada nodo:
+Nota: `lab.sh` detecta el nodo por IP, por eso solo se usa aquí y para `test_basic`; con 2 nodos por máquina se usa `run_suite.sh`.
 
-```text
-hola desde nodo X #1
-hola desde nodo X #2
-hola desde nodo X #3
-hola desde nodo X #4
-hola desde nodo X #5
+## Fase 2. `test_basic` (exactamente 2 nodos)
+
+```sh
+# Máquina A:
+./run_suite.sh dsm2.conf "0" test_basic
+# Máquina B:
+./run_suite.sh dsm2.conf "1" test_basic
 ```
 
-con una pausa de un segundo entre cada envío.
+Esperado en cada una: `n0: PASS` / `n1: PASS`. El log queda en `build/suite/test_basic_n<id>.log` y debe contener `Test A … OK`, `Test D … OK`, `Test B … OK`, `RESULTADO: PASS`.
 
-## Ejemplo de uso
+## Fase 3. Batería principal (4 nodos)
 
-En una máquina:
+Lanzar **el mismo comando casi a la vez** en cada máquina:
 
-```bash
-bash lab.sh udp-recv
+```sh
+# Máquina A (nodos 0 y 1):
+./run_suite.sh dsm4.conf "0 1" test_msi test_locks test_alloc test_edge test_task app_tasks app_pagerank app_heat3d
+# Máquina B (nodos 2 y 3):
+./run_suite.sh dsm4.conf "2 3" test_msi test_locks test_alloc test_edge test_task app_tasks app_pagerank app_heat3d
 ```
 
-En otra máquina:
+Variables opcionales: `TMO=180` (timeout por test, en segundos), `GAP=4` (pausa entre tests), `DSM_VERBOSE=1` (log detallado).
 
-```bash
-bash lab.sh udp-send
+| Test | Qué demuestra | Línea esperada |
+|---|---|---|
+| `test_msi` | MSI: I→S, S→I, S→M, M→S, lecturas viejas (anillo de 100 pasos), false sharing, cruce de página, stats | `F1…F8 OK`, `RESULTADO: PASS` |
+| `test_locks` | Exclusión mutua, invariante `a==b` en sección crítica, locks independientes | `L1…L3 OK`, `RESULTADO: PASS` |
+| `test_alloc` | Misma dirección en todos los nodos, regiones disjuntas, `dsm_alloc` concurrente, agotamiento → NULL | `A1…A4 OK`, `RESULTADO: PASS` |
+| `test_edge` | NULL → SIGSEGV normal; `read()` sobre buffer DSM | `E1, E2 OK`, `RESULTADO: PASS` |
+| `test_task` | Tareas: nodo explícito, balanceo, datos en DSM, anidadas, caída con/sin reintento | `[n0] test_tasks (4 nodos): PASS` |
+| `app_tasks` | Multiplicación de matrices por tareas (verificada contra el resultado secuencial) | `app_tasks N=96 … PASS` |
+| `app_pagerank` | PageRank distribuido con locks y barriers | `RESULTADO: PASS` (`suma≈1.0`) |
+| `app_heat3d` | Stencil 3D distribuido | `RESULTADO: PASS` |
+
+Notas:
+- `test_task` tarda **más de 60 s**: los nodos víctima duermen 60 s antes de salir. Es normal. Con 4 nodos también se ejecuta el caso 6b (muerte sin reintento).
+- Salida final de la corrida: `SUITE: TODO PASS` (código de salida 0). Si falla, indica el log: `build/suite/<test>_n<id>.log`. Un `rc=124` es un **timeout** (cuelgue).
+- `app_heat3d` por sí solo **no detecta lecturas viejas** (el campo analítico es un punto fijo del stencil); la prueba que sí lo hace es la fase F5 de `test_msi`. No presentar heat3d como prueba de coherencia.
+
+## Fase 4. Repetición (fallos intermitentes)
+
+Un PASS aislado no descarta errores de coherencia. Repetir 30 veces:
+
+```sh
+# Máquina A:
+for i in $(seq 30); do ./run_suite.sh dsm4.conf "0 1" test_msi test_locks || break; done
+# Máquina B:
+for i in $(seq 30); do ./run_suite.sh dsm4.conf "2 3" test_msi test_locks || break; done
 ```
 
-Así puede verificarse la comunicación UDP entre ambos equipos.
+Para `test_basic` (2 nodos) se puede usar el script existente: `bash lab.sh rep 30`, que deja `build/rep_resumen_n<ID>.txt`.
 
----
+Criterio: 30 de 30 PASS y `reintentos` bajos o en 0 en los logs.
 
-# Modo `tasks`
+## Fase 5. Escala (16 nodos)
 
-```bash
-bash lab.sh tasks
+```sh
+# Máquina A:
+./run_suite.sh dsm16.conf "0 1 2 3 4 5 6 7" test_msi app_pagerank
+# Máquina B:
+./run_suite.sh dsm16.conf "8 9 10 11 12 13 14 15" test_msi app_pagerank
 ```
 
-Comprueba que exista el ejecutable:
+Esperado: PASS. Si hay timeouts de barrier, subir `barrier_timeout_ms` y revisar `worker_pool_size`.
 
-```text
-build/app_tasks
+## Fase 6. Evidencia de que se usó la API
+
+Para mostrar en la revisión (guardar capturas o logs):
+
+1. **Contadores del protocolo.** `test_msi` (fase F8) imprime en el nodo 0: `stats cluster: faultR=… faultW=… invalidaciones=… fetch=…`. Valores distintos de cero prueban que MSI corrió de verdad. También las líneas `stats n<id>` que imprimen `app_pagerank` y `app_heat3d`.
+2. **Funciones de la API que usa cada binario:**
+
+```sh
+nm -u build/test_msi    | grep dsm_
+nm -u build/test_locks  | grep dsm_
+nm -u build/app_tasks   | grep dsm_
 ```
 
-y luego lo ejecuta de la forma:
+3. **Estado de páginas y reporte HTML** (desde un test o app propia): `dsm_print_stats(stdout)`, `dsm_print_global_pages(stdout, 16)`, `dsm_print_allocs(stdout)` y `dsm_write_html("reporte.html")` para abrirlo en el navegador durante la revisión.
+4. **Registro de corridas:** conservar `build/suite/*.log` y, de cada corrida, `hostname`, `ip -4 addr`, `md5sum dsm4.conf` (demuestra que son dos equipos distintos con la misma configuración).
 
-```bash
-./build/app_tasks "$CONF" 96
-```
+## Problemas conocidos
 
-Además:
+| Síntoma | Causa | Solución |
+|---|---|---|
+| `Permiso denegado`, exit 126 | binario sin bit de ejecución (`build/` del zip) | `rm -rf build && make` |
+| `config_load: No such file or directory` | el `.conf` no existe en esa máquina | copiarlo a ambas |
+| Barrier o `dsm_init` colgado | `max_nodes` ≠ nodos lanzados, o falta una máquina | revisar el `.conf` y lanzar todos los ids |
+| `rc=124` | timeout (cuelgue real) | revisar el log del nodo; repetir con `DSM_VERBOSE=1` |
+| Puerto en uso entre tests | TIME_WAIT | subir `GAP` a 8–10 |
 
-- Define variables de entorno:
-  - `DSM_VERBOSE=1`
-  - `DSM_NODE_ID=<id>`
-- Limita la ejecución a 180 segundos.
-- Guarda la salida en:
+## Qué NO está cubierto
 
-```text
-build/lab_tasks_n<ID>.log
-```
+- **Caída abrupta de un nodo** entre máquinas (`kill -9` en pleno test) y la recuperación de sus páginas en M: falta definir el comportamiento esperado y escribir el test.
+- **Salida ordenada de un nodo** (`dsm_shutdown` escalonado, `MSG_PAGE_RELEASE`): test pendiente de escribir.
+- **Un test que recorra cada función pública** (`dsm_free`, `dsm_prefetch_read/write`, `dsm_last_error`…) con tabla `OK/FALLO`: pendiente.
+- **Nombres de host** (solo se han usado IPs) y WSL2 entre máquinas.
+- Supuestos de los tests nuevos sin confirmar en ejecución: contadores de stats acumulativos, ids de lock 20–22 y de barrier desde 1000 sin choques, `dsm_alloc` imposible → NULL.
 
-- Muestra:
-  - Duración de la ejecución.
-  - Código de salida del programa.
+## Orden recomendado antes de la demo (27-nov)
 
-**Uso recomendado:** ejecutar y verificar el comportamiento principal de la aplicación distribuida.
-
----
-
-# Modo `rep`
-
-```bash
-bash lab.sh rep
-```
-
-o
-
-```bash
-bash lab.sh rep 20
-```
-
-Ejecuta repetidamente el programa:
-
-```text
-build/test_basic
-```
-
-Por defecto realiza:
-
-```text
-10 iteraciones
-```
-
-En cada iteración:
-
-1. Ejecuta `test_basic`.
-2. Guarda el log generado.
-3. Busca el resultado reportado.
-4. Extrae la cantidad de reintentos.
-5. Genera un resumen de la ejecución.
-
-Los archivos generados quedan en:
-
-```text
-build/rep_n<ID>_1.log
-build/rep_n<ID>_2.log
-...
-```
-
-y el resumen final en:
-
-```text
-build/rep_resumen_n<ID>.txt
-```
-
-**Uso recomendado:** detectar errores intermitentes, condiciones de carrera o problemas de sincronización que no aparecen en una sola ejecución.
-
----
-
-# Resumen rápido
-
-| Comando | Función |
-|----------|----------|
-| `bash lab.sh info` | Verificar configuración y conectividad |
-| `bash lab.sh udp-recv` | Escuchar paquetes UDP |
-| `bash lab.sh udp-send` | Enviar paquetes UDP a otros nodos |
-| `bash lab.sh tasks` | Ejecutar la aplicación `app_tasks` |
-| `bash lab.sh rep 10` | Ejecutar `test_basic` varias veces y recopilar estadísticas |
-
----
-
-# Conclusión
-
-El script `lab.sh` sirve como herramienta de apoyo para validar el entorno del laboratorio, comprobar la comunicación entre nodos, ejecutar la aplicación principal y automatizar pruebas repetitivas. Es útil tanto para detectar errores de configuración como para verificar el correcto funcionamiento del sistema distribuido.
+1. Fase 0 y Fase 1 (UDP).
+2. Fase 2 y Fase 3 completas; arreglar lo que falle.
+3. Fase 4 (30 repeticiones) de `test_msi` y `test_locks`.
+4. Fase 5 (16 nodos) una vez.
+5. Fase 6: guardar la evidencia y ensayar la demo en las mismas máquinas del laboratorio.

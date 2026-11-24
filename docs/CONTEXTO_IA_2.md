@@ -424,3 +424,131 @@ Este apéndice **no lo completan los autores**: es el registro de la persona que
 | E13 *(añadido)* | confirmada (PASS), alcance limitado | 23-nov-2026; 2 equipos Linux nativos (`soporte`), `eno1`, nodo 0 `172.19.12.81`, nodo 1 `172.19.12.48`; `DSM_VERBOSE=1 DSM_NODE_ID=<0 o 1> ./build/test_basic dsm.conf` | n0: `nodo 1 ahora VIVO`, Test A/D/B OK, `RESULTADO: PASS`, `exit=0`. n1: `nodo 0 ahora VIVO`, Test A/D/B OK, `RESULTADO: PASS`, `exit=0`; `reintentos=0` en ambos | n/a (sin fallo en la corrida final). Previos: binarios sin `x` en `build/` ajena (`Permiso denegado`, exit 126) y `config_load: No such file or directory` por archivo de config ausente (§14.3) | `build/lab_n0.log` (equipo `.81`) y `build/lab_n1.log` (equipo `.48`); contadores en §14.1 | UDP, repeticiones, 3+ nodos y caída real **sin verificar** (§14.4). Actualizado §9 de forma parcial |
 
 Al llenarlo: (1) copiar el texto literal del síntoma, no una paráfrasis; (2) citar `archivo:línea` del código que lo emite; (3) marcar `confirmada` solo si el log y el código coinciden; (4) si un caso contradice este documento, corregirlo (y `README.md` si aplica); (5) si no se pudo ejecutar, escribir `no ejecutado` y el motivo en la columna Acción; (6) cuando E02 y E12 estén resueltos, actualizar §5 y §9 para que dejen de decir NO VERIFICADO. (7) E13 se añadió el 23-nov-2026 porque el protocolo original no cubría computadoras distintas; E02 y E04–E07 se propusieron con comandos, pero **no se registró ninguna salida**, por eso siguen `pendiente`. No hace falta enviar los logs a los autores: la evidencia queda aquí para la siguiente persona/IA que entre al proyecto.
+
+# Actualización de `CONTEXTO_IA.md` (24-nov-2026)
+
+Parche listo para pegar en `CONTEXTO_IA.md`. Cada bloque dice **qué sección reemplazar o añadir** y trae el texto final. Todo lo nuevo se escribió leyendo el código y los archivos del repo (Makefile, `internal.h`, apps); **no se ha compilado ni ejecutado ningún test nuevo**, y así queda marcado. Complementa a `GUIA_EJECUCION_PRUEBAS.md`.
+
+---
+
+## 1. Encabezado: añadir bajo la "Actualización 23-nov-2026"
+
+> **Actualización 24-nov-2026:** se vio el `Makefile` real y las apps `app_pagerank.c` y `app_heat3d.c`; se escribieron **4 tests nuevos** (`test_msi`, `test_locks`, `test_alloc`, `test_edge`, con `test_util.h`) y los scripts `run_suite.sh` y `run_loop.sh`; existe `lab.sh` (info, udp-recv, udp-send, tasks, rep). Los tests nuevos y `run_suite.sh` están **escritos pero NO ejecutados**. Cómo correr todo: `GUIA_EJECUCION_PRUEBAS.md`.
+
+## 2. §0, punto 8: reemplazar por
+
+8. **La batería ejecutable del repo hoy es:** `scripts/run_local.sh` (2 nodos de `test_basic`), `lab.sh` (diagnóstico de red, `app_tasks`, repeticiones de `test_basic`) y `run_suite.sh` (nuevo; lanza los nodos locales de cada test). Siguen sin existir `scripts/run_all.sh`, `run_n.sh`, `gen_conf.sh` ni las apps `test_stress`, `test_hb`, `test_leave`, `app_matmul`, `app_counter`. Las docs difieren: `AVANCE3.md:14` dice 11 pruebas PASS y `README.md:41` dice 14.
+
+## 3. §1 (trampas): sustituir las filas del Makefile
+
+Eliminar las filas sobre `Makefile:9` (10 binarios), `make test` → `run_all.sh`, `-lm` solo en apps, y "NO VERIFICADO el contenido del Makefile". Sustituir por:
+
+| Hecho | Consecuencia |
+|---|---|
+| El `Makefile` actual (visto el 24-nov) define `BINS := test_basic test_task app_tasks app_pagerank app_heat3d dsm_node print_sizes` y una regla genérica `build/%: apps/%.c $(LIB) $(MATHLIB) src/internal.h` con `LDLIBS := -lm -lrt` y `LIB` = `config cluster network pager directory dsm stats tasks` | `make` (target `all`) compila esos 7 binarios; cualquier `apps/<x>.c` se compila con `make build/<x>` sin regla nueva. Para los tests nuevos basta añadirlos a `BINS` (y `apps/test_util.h` como prerrequisito) |
+| `make test` ejecuta `./scripts/run_local.sh dsm.conf` | Ya no apunta a `run_all.sh` (inexistente) |
+| El binario de tareas se llama **`test_task`** (singular); su salida imprime `test_tasks (N nodos)` | No confundir el nombre del binario con el texto que imprime |
+| `wait_all_nodes` tiene default 1 (`config.c`); `dsm.conf` no lo define | No hace falta añadirlo |
+
+## 4. §2 (estructura): actualizar `apps/` y `scripts/`
+
+```
+├── apps/       test_basic.c, test_task.c, app_tasks.c, app_pagerank.c, app_heat3d.c
+│               + NUEVOS (24-nov, no ejecutados): test_msi.c, test_locks.c, test_alloc.c, test_edge.c, test_util.h
+├── scripts/    run_local.sh
+│   lab.sh      (raíz o scripts/; modos: info, udp-recv, udp-send, tasks, rep)
+│   run_suite.sh, run_loop.sh   NUEVOS (no ejecutados)
+└── docs/       … + GUIA_EJECUCION_PRUEBAS.md, CONTEXTO_IA_ACTUALIZACION_24NOV.md
+```
+
+## 5. §3: añadir a la tabla "Apps presentes y salidas reales"
+
+| App | Uso | Salida |
+|---|---|---|
+| `app_pagerank.c` | `app_pagerank dsm.conf [N=131072] [DEG=16] [ITER=12]` | `[n0] iter=%u L1=...`, `[n0] suma=... esperada=... iter=... estructura=OK: OK/FALLO`, `stats_local`/`stats nX`, `[nX ip=...] RESULTADO: PASS/FALLO`; usa `dsm_lock(5/6)` y barriers 10, 1000+it, 2000+it, 3000+it, 4000, 9000 |
+| `app_heat3d.c` | `app_heat3d dsm.conf [NZ=2048] [STEPS=8]` | `[n0] step=%u suma=...`, `[n0] error maximo=... manufacturado=OK/FALLO`, `RESULTADO: PASS/FALLO`; usa `dsm_lock(7/8)` y barriers 10, 100+s, 200+s, 300, 500 |
+
+Nota (inferida del código, no ejecutada): el campo analítico de `app_heat3d` es lineal, su laplaciano es 0 y por tanto es un punto fijo del stencil (`nxt == cur`): una copia **desactualizada** vale lo mismo que la correcta, así que esta app **no demuestra coherencia** por sí sola; detecta páginas en cero o basura, no lecturas viejas. La detección de lecturas viejas está en `test_msi` (fase F5).
+
+### Tests nuevos (escritos el 24-nov-2026, **NO ejecutados**)
+
+Todos usan solo la API de `internal.h`; nodo propio por `DSM_NODE_ID`; participantes de barrier = `max_nodes`; barriers desde el id 1000 y locks 20–22 (supuesto: no chocan con ids internos).
+
+| Test | Nodos | Fases |
+|---|---|---|
+| `test_msi.c` | ≥3 (ideal 4) | F1 I→S; F2 escritor rotativo e invalidación (60 rondas); F3 upgrade S→M; F4 M→S→M; F5 anillo anti-lectura-vieja (100 pasos); F6 false sharing sin lock (50 pasos); F7 acceso cruzando página; F8 stats (`ST_FAULT_R/W`, `ST_INVALIDATIONS` > 0) |
+| `test_locks.c` | ≥2 | L1 contador exacto bajo lock; L2 invariante `a==b` en sección crítica; L3 dos locks independientes |
+| `test_alloc.c` | ≥2 | A1 misma dirección de `dsm_alloc_named` en todos los nodos; A2 regiones disjuntas; A3 `dsm_alloc` concurrente sin pisarse; A4 reserva imposible → NULL |
+| `test_edge.c` | ≥1 | E1 NULL → SIGSEGV normal (hijo con `fork`); E2 `read()` del kernel sobre buffer DSM (informativo si la página no está residente) |
+
+Supuestos ya respaldados por el código: nombre repetido ⇒ mismo puntero (`dsm.c:170-173`); `alloc fallo` cuando no hay espacio (`app_tasks.c`, E09); contadores del pager acumulativos (`pager_stats_t`). Supuestos aún **sin confirmar en ejecución**: los ids de lock/barrier no chocan, `fork` tras `dsm_init` es inocuo para el hijo que solo toca NULL, y el comportamiento de `read()` sobre páginas no residentes.
+
+## 6. §11 (comandos útiles): añadir
+
+```sh
+# Tests nuevos: añadir a BINS en el Makefile y compilar
+make build/test_msi build/test_locks build/test_alloc build/test_edge
+
+# Una máquina, varios nodos locales (ver GUIA_EJECUCION_PRUEBAS.md)
+./run_suite.sh dsm4.conf "0 1" test_msi test_locks test_alloc test_edge test_task app_tasks app_pagerank app_heat3d   # máquina A
+./run_suite.sh dsm4.conf "2 3" test_msi test_locks test_alloc test_edge test_task app_tasks app_pagerank app_heat3d   # máquina B
+
+# Red (UDP explícito)
+bash lab.sh udp-recv     # en un equipo
+bash lab.sh udp-send     # en el otro
+bash lab.sh rep 30       # test_basic repetido, resumen en build/rep_resumen_n<ID>.txt
+```
+
+## 7. §12 (protocolo): añadir casos a la tabla
+
+Layout para varios nodos con **2 computadoras**: 2 procesos por máquina, misma IP con puertos distintos (`dsm4.conf`: nodos 0,1 en 172.19.12.81:27800/27801 y nodos 2,3 en 172.19.12.48:27800/27801; UDP = puerto + 10). `test_basic` exige exactamente 2 nodos (barrier fijo en 2).
+
+| ID | Cómo ejecutarlo | Qué debe observarse |
+|---|---|---|
+| E14 *(propuesto)* | `run_suite.sh dsm4.conf … test_msi` en las 2 máquinas | `F1…F8 OK`, `RESULTADO: PASS` en los 4 nodos; `stats cluster` con fallos e invalidaciones > 0 |
+| E15 *(propuesto)* | `test_locks`, 4 nodos | `L1…L3 OK`, `RESULTADO: PASS` |
+| E16 *(propuesto)* | `test_alloc`, 4 nodos | `A1…A4 OK`, `RESULTADO: PASS` |
+| E17 *(propuesto)* | `test_edge`, 4 nodos | `E1, E2 OK`; línea informativa de `read()` |
+| E18 *(propuesto)* | batería completa en 4 nodos (`test_task` tarda >60 s: los nodos víctima duermen 60 s) | `SUITE: TODO PASS` |
+| E19 *(propuesto)* | E14+E15 repetidos 30 veces en las 2 máquinas | 30/30 PASS; cualquier `rc=124` es un cuelgue real |
+| E20 *(propuesto)* | `dsm16.conf` (8 nodos por máquina), `test_msi` y `app_pagerank` | PASS; si hay timeouts, revisar `barrier_timeout_ms` y `worker_pool_size` |
+
+## 8. §13 (catálogo): añadir filas de los tests nuevos
+
+| Síntoma literal | Origen | Causa inferida / acción |
+|---|---|---|
+| `FALLO …/test_msi.c:N: F2 ronda R: leyo X, esperaba Y (dato viejo)` | `test_msi.c` F2 | Lectura desactualizada tras una escritura remota: invalidación o `on_page_data` incorrectos (§6, invariante 5) |
+| `FALLO … F2 ronda R: se perdio la palabra 0 de la pagina` | `test_msi.c` F2 | La transferencia M→M no conservó el resto de la página (`PAGE_DATA` incompleto o write-back) |
+| `FALLO … F5 paso S: nodo K dato viejo` | `test_msi.c` F5 | Lectura vieja en el anillo; igual que F2 |
+| `FALLO … F6 paso S: palabra K = X` | `test_msi.c` F6 | False sharing perdió una escritura concurrente a la misma página |
+| `FALLO … F8 no hubo invalidaciones` | `test_msi.c` F8 | Contadores en 0: el protocolo no corrió o `ST_INVALIDATIONS` no es acumulativo |
+| `FALLO … L1 contador=X esperado=Y` / `L2 invariante roto … a=X b=Y` | `test_locks.c` | Exclusión mutua rota o el lock no entrega el dato más reciente |
+| `FALLO … A1 'al_a' difiere en nodo K` / `A3 bloque B fue pisado` | `test_alloc.c` | `dsm_alloc_named` no es consistente entre nodos o hay solapes en la tabla de asignaciones |
+| `FALLO … A4 una reserva imposible no devolvio NULL` | `test_alloc.c` | `dsm_alloc` no falla limpio al agotar memoria |
+| `FALLO … E1 el hijo no murio con SIGSEGV` | `test_edge.c` | El handler no restaura `SIG_DFL` para direcciones ajenas (`pager.c:150-153`) o se colgó (alarma de 5 s) |
+| `FALLO … E2 read() sobre pagina ya tocada devolvio N` | `test_edge.c` | El kernel no pudo escribir en un buffer DSM residente |
+| `rc=124, TIMEOUT` en `run_suite.sh` | `run_suite.sh` | Cuelgue real del test: revisar `build/suite/<test>_n<id>.log` y repetir con `DSM_VERBOSE=1` |
+| `build/<test> no existe o no es ejecutable` | `run_suite.sh` | No se compiló o falta `chmod +x`; `rm -rf build && make` |
+
+## 9. §14.4 (pendiente en computadoras distintas): reemplazar por
+
+`bash lab.sh udp-recv` / `udp-send` (prueba UDP explícita; cierra el pendiente del heartbeat); `app_tasks N=96` en 2 equipos (`bash lab.sh tasks`); `bash lab.sh rep 30`; batería de 4 nodos con 2 procesos por máquina (E14–E18); repetición (E19); 16 nodos (E20); E10/E11 entre máquinas (`kill -9` del nodo 1); nombres de host; confirmar con `network.c` el comportamiento del `bind`.
+
+## 10. Apéndice A: añadir filas
+
+| ID | Estado | Fecha / entorno | Síntoma observado | Causa raíz confirmada | Evidencia | Acción |
+|---|---|---|---|---|---|---|
+| E14 | pendiente (test escrito, no ejecutado) | | | | | |
+| E15 | pendiente (test escrito, no ejecutado) | | | | | |
+| E16 | pendiente (test escrito, no ejecutado) | | | | | |
+| E17 | pendiente (test escrito, no ejecutado) | | | | | |
+| E18 | pendiente | | | | | |
+| E19 | pendiente | | | | | |
+| E20 | pendiente | | | | | |
+
+## 11. Sin cubrir todavía (para §9 "NO VERIFICADO")
+
+- Caída abrupta de un nodo con páginas en M, home caído o lock tomado (falta definir el comportamiento esperado: Extra 2 no está implementado, `AVANCE3.md:98,107`).
+- Salida ordenada de un nodo (`dsm_shutdown` escalonado + `MSG_PAGE_RELEASE`): test pendiente de escribir; el diseño dice que devuelve sus páginas pero **no** su directorio.
+- Un test que recorra cada función pública (`dsm_free`, `dsm_prefetch_read/write`, `dsm_last_error`, etc.) con tabla OK/FALLO.
+- Nombres de host y WSL2 entre máquinas.
