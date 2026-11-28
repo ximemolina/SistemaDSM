@@ -156,6 +156,7 @@ int main(int argc, char **argv) {
     }
     print_stats(me, nn, my_ip);
     if (me == 0) *failflag = (double)bad;
+    if (me == 0) dsm_write_html("reporte_pagerank.html");
     if (dsm_barrier(BAR_DONE, nn) != DSM_OK) return 2;
     bad = *failflag != 0.0;
     dsm_shutdown();
