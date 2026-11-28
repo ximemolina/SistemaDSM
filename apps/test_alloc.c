@@ -54,3 +54,42 @@ int main(int argc, char **argv) {
     END_PHASE("A4 agotamiento de memoria");
     return t_done();
 }
+
+    /* A5: la tabla esta replicada: cada nodo ve las asignaciones de TODOS, no solo las de un coordinador */
+    {
+        int ok = 0;
+        for (int tries = 0; tries < 300 && !ok; tries++) {       /* el anuncio por broadcast es asincrono */
+            int named_a = 0, named_b = 0; unsigned blocks[DSM_MAX_NODES] = { 0 };
+            uint64_t first = 0;
+            while (first != UINT64_MAX) {
+                alloc_entry_t e[32]; uint32_t c; uint64_t nx;
+                if (dsm_alloc_list(first, e, 32, &c, &nx) != DSM_OK) break;
+                for (uint32_t i = 0; i < c; i++) {
+                    if (!e[i].live) continue;
+                    if (!strcmp(e[i].name, "al_a") && e[i].addr == (uint64_t)(uintptr_t)pa && e[i].size == 3 * ps) named_a = 1;
+                    if (!strcmp(e[i].name, "al_b") && e[i].addr == (uint64_t)(uintptr_t)pb && e[i].size == 5 * ps) named_b = 1;
+                    if (!e[i].name[0] && e[i].size == ps && e[i].node < g_nn) blocks[e[i].node]++;
+                }
+                first = nx;
+            }
+            ok = named_a && named_b;
+            for (uint32_t k = 0; k < g_nn; k++) if (blocks[k] < BLOCKS) ok = 0;
+            if (!ok) usleep(10000);
+        }
+        CHECK(ok, "A5 la replica local no refleja las asignaciones de todos los nodos");
+    }
+    sync_all();
+    END_PHASE("A5 tabla replicada en todos los nodos");
+
+    /* A6: dsm_free devuelve el espacio: se reutiliza y un segundo free falla */
+    {
+        void *p1 = dsm_alloc(ps);
+        CHECK(p1 != NULL, "A6 dsm_alloc devolvio NULL");
+        CHECK(dsm_free(p1) == DSM_OK, "A6 dsm_free fallo");
+        CHECK(dsm_free(p1) == DSM_ERR_BAD_ARG, "A6 el doble free no se detecto");
+        void *p2 = dsm_alloc(ps);
+        CHECK(p2 == p1, "A6 el espacio liberado no se reutilizo (%p vs %p)", p1, p2);
+        CHECK(dsm_free(p2) == DSM_OK, "A6 segundo free fallo");
+    }
+    sync_all();
+    END_PHASE("A6 free y reutilizacion");
