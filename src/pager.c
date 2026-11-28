@@ -1,9 +1,12 @@
 /*
  * pager.c (A): memoria local, doble mapeo, handler de SIGSEGV, MSI local.
- * Locks: spinlocks por franja (page_id % NSTRIPE) para el estado de pagina y un
- * spinlock aparte para la tabla de fallos y la cola de peticiones. Orden: franja -> fallos.
- * Son async-signal-safe (atomic_flag + sched_yield); se toman un instante y nunca
- * durante una espera de red ni de semaforo.
+ * Locks: mutexes por franja (page_id % NSTRIPE) para el estado de pagina y un
+ * mutex aparte para la tabla de fallos y la cola de peticiones. Orden: franja -> fallos.
+ * Las esperas (pagina que llega, cola de peticiones) se hacen con semaforos POSIX.
+ * Los mutexes se toman un instante y nunca durante una espera de red ni de semaforo.
+ * Nota: el handler de SIGSEGV es sincrono (lo provoca el propio hilo de la aplicacion,
+ * que nunca mantiene estos mutexes al acceder a la memoria compartida), por lo que
+ * tomar mutexes dentro del handler no puede autointerbloquearse.
  */
 #define _GNU_SOURCE
 #include "internal.h"
@@ -16,7 +19,6 @@
 #include <ucontext.h>
 #include <pthread.h>
 #include <semaphore.h>
-#include <sched.h>
 #include <stdatomic.h>
 #include <endian.h>
 #include <sys/mman.h>
@@ -41,8 +43,8 @@ static char *app_base, *sys_base;
 static int mem_fd = -1;
 static page_local_t *loc;
 
-static atomic_flag stripe_lk[NSTRIPE];
-static atomic_flag fault_lk;
+static pthread_mutex_t stripe_lk[NSTRIPE];
+static pthread_mutex_t fault_lk;
 static fault_ctx_t faults[MAX_FAULTS];
 static req_t ring[REQ_RING];
 static unsigned ring_head, ring_tail;
@@ -51,12 +53,10 @@ static pthread_t sender_th;
 static volatile int sender_run;
 static atomic_ullong st_fr, st_fw, st_rx, st_inv, st_fetch, st_delay, st_punch, st_retry;
 
-static inline void spin(atomic_flag *f) { while (atomic_flag_test_and_set_explicit(f, memory_order_acquire)) sched_yield(); }
-static inline void unspin(atomic_flag *f) { atomic_flag_clear_explicit(f, memory_order_release); }
-#define SLK(p)  spin(&stripe_lk[(p) % NSTRIPE])
-#define SULK(p) unspin(&stripe_lk[(p) % NSTRIPE])
-#define FLK()   spin(&fault_lk)
-#define FULK()  unspin(&fault_lk)
+#define SLK(p)  pthread_mutex_lock(&stripe_lk[(p) % NSTRIPE])
+#define SULK(p) pthread_mutex_unlock(&stripe_lk[(p) % NSTRIPE])
+#define FLK()   pthread_mutex_lock(&fault_lk)
+#define FULK()  pthread_mutex_unlock(&fault_lk)
 
 /* ---- salida fatal async-signal-safe (sin printf) ---- */
 static void put_u64(char *b, size_t *n, uint64_t v) {
@@ -301,6 +301,8 @@ dsm_err_t pager_init(const dsm_config_t *cfg) {
 #if !defined(__x86_64__)
     fprintf(stderr, "[dsm] AVISO: arquitectura no x86-64; se usa la deteccion lectura/escritura por estado de pagina\n");
 #endif
+    for (int i = 0; i < NSTRIPE; i++) pthread_mutex_init(&stripe_lk[i], NULL);
+    pthread_mutex_init(&fault_lk, NULL);
     if (npages > (1ULL << 32) || !(loc = calloc(npages, sizeof *loc))) return DSM_ERR_NOMEM;
     for (int i = 0; i < MAX_FAULTS; i++) sem_init(&faults[i].done, 0, 0);
     sem_init(&ring_sem, 0, 0);
