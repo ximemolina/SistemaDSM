@@ -78,6 +78,7 @@ int main(int argc, char **argv) {
         for (uint32_t n = 0; n < nn; n++) printf("%snodo%u=%d", n ? " " : "", n, per[n]);
         printf("), %llu ms: %s\n", (unsigned long long)ms, bad ? "FALLO" : "PASS");
     }
+    if (me == 0) dsm_write_html("reporte_matrices.html");
     if (dsm_barrier(1, nn) != DSM_OK) return 2;
     dsm_shutdown();
     return bad;
