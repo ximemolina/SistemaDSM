@@ -26,7 +26,7 @@ static void print_stats(uint32_t me, uint32_t nn, const char *ip) {
                (unsigned long long)local.v[ST_INVALIDATIONS], (unsigned long long)local.v[ST_FETCHES],
                (unsigned long long)local.v[ST_PUNCHED], (unsigned long long)local.v[ST_TX_MSGS],
                (unsigned long long)local.v[ST_TX_BYTES]);
-    if (me != 0) return;
+    if (me != 0) return;  
     for (uint32_t n = 0; n < nn; n++) {
         dsm_stats_t s;
         if (dsm_stats_node(n, &s) != DSM_OK) { printf("[n0] stats n%u no disponibles\n", n); continue; }
@@ -134,6 +134,7 @@ int main(int argc, char **argv) {
     }
     print_stats(me, nn, my_ip);
     if (me == 0) *failflag = (double)bad;
+    if (me == 0) dsm_write_html("reporte_heat3d.html");
     if (dsm_barrier(BAR_DONE, nn) != DSM_OK) return 2;
     bad = *failflag != 0.0;
     dsm_shutdown();

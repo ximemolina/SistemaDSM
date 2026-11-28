@@ -53,6 +53,8 @@ typedef enum {
     MSG_PAGE_RELEASE,                       /* [P2] un nodo que sale devuelve sus paginas */
     MSG_LOCK_ACQUIRE, MSG_LOCK_GRANT, MSG_LOCK_RELEASE,   /* [P2] dsm_lock */
     MSG_SPAWN_TASK, MSG_TASK_DONE, MSG_TASK_STATUS,       /* [Extra 1] ejecucion distribuida */
+    MSG_ALLOC_ANNOUNCE,
+    MSG_ALLOC_NAME,
     MSG_TYPE_MAX
 } msg_type_t;
  
@@ -133,6 +135,11 @@ typedef struct {
     uint32_t node, pid, seq; uint8_t live;
     uint64_t addr, size; char name[DSM_NAME_LEN];
 } alloc_entry_t;
+
+/* ---- alloc.c ---- */
+dsm_err_t alloc_init(const dsm_config_t *cfg);
+dsm_err_t alloc_sync(void);
+void      dsm_set_error(dsm_err_t e);
  
 /* ---- config.c ---- */
 dsm_err_t config_load(const char *path, dsm_config_t *out);
@@ -157,7 +164,6 @@ node_id_t cluster_home_of(page_id_t page);
 node_id_t cluster_initial_owner(page_id_t page);
 node_id_t cluster_barrier_coord(uint64_t id);
 node_id_t cluster_lock_coord(uint64_t id);
-node_id_t cluster_alloc_coord(void);
 void      cluster_set_local_tasks(uint32_t load);        /* [Extra 1] lo llama tasks.c */
 uint32_t  cluster_tasks_running(node_id_t id);
 uint32_t  cluster_load100(node_id_t id);

@@ -121,12 +121,12 @@ void dsm_print_global_pages(FILE *f, unsigned max_per_node) {
 }
 
 void dsm_print_allocs(FILE *f) {
-    fprintf(f, "asignaciones (coordinador = nodo %u)\n%-4s %-6s %-8s %-4s %-14s %-12s %-5s %s\n", cluster_alloc_coord(), "id", "nodo", "proceso", "orden", "direccion", "bytes", "viva", "nombre");
+    fprintf(f, "asignaciones (tabla replicada en todos los nodos)\n%-4s %-6s %-8s %-4s %-14s %-12s %-5s %s\n", "id", "nodo", "proceso", "orden", "direccion", "bytes", "viva", "nombre");
     uint64_t first = 0; unsigned id = 0;
     while (first != UINT64_MAX) {
         alloc_entry_t e[32]; uint32_t c; uint64_t nx;
         dsm_err_t rc = dsm_alloc_list(first, e, 32, &c, &nx);
-        if (rc != DSM_OK) { fprintf(f, "(no se pudo consultar al coordinador: err %d)\n", rc); return; }
+        if (rc != DSM_OK) { fprintf(f, "(no se pudo leer la tabla de asignaciones: err %d)\n", rc); return; }
         for (uint32_t i = 0; i < c; i++, id++)
             fprintf(f, "%-4u %-6u %-8u %-4u 0x%-12llx %-12llu %-5s %s\n", id, e[i].node, e[i].pid, e[i].seq,
                     (unsigned long long)e[i].addr, (unsigned long long)e[i].size, e[i].live ? "si" : "no", e[i].name);

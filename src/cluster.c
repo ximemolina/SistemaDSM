@@ -79,7 +79,6 @@ node_id_t cluster_home_of(page_id_t page) { return (node_id_t)(cluster_splitmix6
 node_id_t cluster_initial_owner(page_id_t page) { return (node_id_t)((page * C->page_size) / C->mem_per_node); }
 node_id_t cluster_barrier_coord(uint64_t id) { return (node_id_t)(cluster_splitmix64(id ^ C->hash_seed) % C->max_nodes); }
 node_id_t cluster_lock_coord(uint64_t id) { return (node_id_t)(cluster_splitmix64(id ^ C->hash_seed ^ 0x10c4ULL) % C->max_nodes); }
-node_id_t cluster_alloc_coord(void) { return 0; }
 
 /* ---- carga (Extra 1): cada nodo la anuncia en sus latidos (req_id = tareas, page_id = loadavg x 100) ---- */
 void cluster_set_local_tasks(uint32_t load) { atomic_store(&tasks_run[C->self_id], load); }
