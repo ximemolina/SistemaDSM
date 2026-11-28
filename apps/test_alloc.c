@@ -2,6 +2,8 @@
  *  A1 dsm_alloc_named devuelve la MISMA direccion en todos los nodos
  *  A2 nombres distintos no se solapan y el contenido no se mezcla
  *  A3 dsm_alloc sin nombre desde varios nodos: bloques propios que nadie pisa
+ *  A5 la tabla de asignaciones esta replicada en todos los nodos
+ *  A6 dsm_free devuelve el espacio: se reutiliza y el doble free se detecta
  *  A4 pedir mas memoria de la que existe falla limpio (NULL) sin colgarse
  */
 #include "test_util.h"
@@ -48,13 +50,6 @@ int main(int argc, char **argv) {
     sync_all();
     END_PHASE("A3 dsm_alloc concurrente sin solapes");
 
-    /* A4 */
-    void *huge = dsm_alloc((size_t)1 << 50);
-    CHECK(huge == NULL, "A4 una reserva imposible no devolvio NULL");
-    END_PHASE("A4 agotamiento de memoria");
-    return t_done();
-}
-
     /* A5: la tabla esta replicada: cada nodo ve las asignaciones de TODOS, no solo las de un coordinador */
     {
         int ok = 0;
@@ -93,3 +88,10 @@ int main(int argc, char **argv) {
     }
     sync_all();
     END_PHASE("A6 free y reutilizacion");
+
+    /* A4 */
+    void *huge = dsm_alloc((size_t)1 << 50);
+    CHECK(huge == NULL, "A4 una reserva imposible no devolvio NULL");
+    END_PHASE("A4 agotamiento de memoria");
+    return t_done();
+}
